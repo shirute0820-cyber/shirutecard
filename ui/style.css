@@ -170,6 +170,16 @@ main {
 .card.empty-slot { background: transparent; border-style: dashed; color: var(--muted); cursor: default; align-items: center; justify-content: center; }
 .card.event-zone { border-color: var(--accent2); color: var(--accent2); font-size: 11px; }
 .card .name { font-weight: 600; }
+.card .race-line {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.card .name.monster-name {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
 .card .stat-line { color: var(--muted); }
 .card .cost-num {
   color: var(--accent);
@@ -214,11 +224,6 @@ main {
   color: #1a1a1a;
   padding: 2px 4px;
   cursor: pointer;
-}
-.card .tr-countdown {
-  margin-top: 4px;
-  font-size: 10px;
-  color: var(--muted);
 }
 
 .controls {
