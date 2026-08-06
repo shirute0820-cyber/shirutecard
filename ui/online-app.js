@@ -432,67 +432,86 @@ let selectedAttacker = null;
 let keepSelection = null;
 let mulliganReturn = new Set();
 
-const CANCELLED = Symbol("cancelled");
+export const CANCELLED = Symbol("cancelled");
 
-function pickMonster(candidates, label) {
-  if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-  const listText = candidates.map((m, i) => `${i}: ${m.defName} (${m.currentAtk}/${m.currentHp})`).join("\n");
-  const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
-  if (input === null) return CANCELLED;
-  const idx = Number(input);
-  return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
+function pickFromList(items, label, renderLabel) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("picker-modal-overlay");
+    const title = document.getElementById("picker-modal-title");
+    const list = document.getElementById("picker-modal-list");
+    const cancelBtn = document.getElementById("picker-modal-cancel");
+
+    title.textContent = label;
+    list.innerHTML = "";
+    for (const item of items) {
+      const btn = document.createElement("button");
+      btn.className = "picker-item";
+      btn.textContent = renderLabel(item);
+      btn.onclick = () => {
+        overlay.style.display = "none";
+        resolve(item);
+      };
+      list.appendChild(btn);
+    }
+    cancelBtn.onclick = () => {
+      overlay.style.display = "none";
+      resolve(CANCELLED);
+    };
+    overlay.style.display = "flex";
+  });
 }
-function pickHandCard(candidates, label) {
+
+export async function pickMonster(candidates, label) {
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
-  const listText = candidates.map((c, i) => `${i}: ${c.defName}`).join("\n");
-  const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
-  if (input === null) return CANCELLED;
-  const idx = Number(input);
-  return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
+  return pickFromList(candidates, label, (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`);
+}
+export async function pickHandCard(candidates, label) {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  return pickFromList(candidates, label, (c) => c.defName);
 }
 const PARAM_BUILDERS = {
-  投石: ({ opponent }) => {
-    const t = pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター");
+  投石: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
-  ドラゴンの眼光: ({ opponent }) => {
-    const t = pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+  ドラゴンの眼光: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
-  用意周到: ({ player, selfUid }) => {
-    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "保留を付与する手札");
+  用意周到: async ({ player, selfUid }) => {
+    const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "保留を付与する手札");
     if (c === CANCELLED) return null;
     return { targetHandUid: c?.uid };
   },
-  ドラゴンの血誓: ({ player, selfUid }) => {
-    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
+  ドラゴンの血誓: async ({ player, selfUid }) => {
+    const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
-  滝の試練: ({ player, selfUid }) => {
-    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
+  滝の試練: async ({ player, selfUid }) => {
+    const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
-  リバーススケイル: ({ player }) => {
-    const t = pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
+  リバーススケイル: async ({ player }) => {
+    const t = await pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
 };
 
 const TRANSCEND_PARAM_BUILDERS = {
-  福音受けし者: ({ opponent }) => {
-    const t = pickMonster(opponent.board.filter(Boolean), "《超越》で破壊する敵モンスター");
+  福音受けし者: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "《超越》で破壊する敵モンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
-  老練の竜使い: ({ player }) => {
-    const t = pickMonster(
+  老練の竜使い: async ({ player }) => {
+    const t = await pickMonster(
       player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")),
       "《超越》で貫通を付与する自分のドラゴン・亜竜種"
     );
@@ -531,7 +550,7 @@ function renderMonsterCard(ownerId, instance) {
         const player = game.players[myPlayerId];
         const opponent = game.players[opponentId()];
         const builder = TRANSCEND_PARAM_BUILDERS[instance.defName];
-        const params = builder ? builder({ player, opponent }) : {};
+        const params = builder ? await builder({ player, opponent }) : {};
         if (params === null) return; // 対象選択をキャンセル → 超越自体を中断
         try {
           game.useTranscend(myPlayerId, instance, params);
@@ -594,7 +613,7 @@ function renderBoard(role) {
         el.onclick = async () => {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[selectedHandCard.defName];
-          const params = builder ? builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
+          const params = builder ? await builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
           if (params === null) {
             // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
             render();
@@ -697,7 +716,7 @@ function renderHand(role) {
         if (def?.type === "イベント") {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
+          const params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
           try {
             game.playEvent(myPlayerId, c.uid, params);
@@ -711,7 +730,7 @@ function renderHand(role) {
         if (def?.releaseRequirement) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
+          const params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
           try {
             game.summonFromHand(myPlayerId, c.uid, null, params);
