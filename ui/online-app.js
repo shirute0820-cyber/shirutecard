@@ -646,11 +646,6 @@ function renderBoard(role) {
       container.appendChild(el);
     }
   });
-
-  const eventZone = document.createElement("div");
-  eventZone.className = "card empty-slot event-zone";
-  eventZone.textContent = "イベントゾーン";
-  container.appendChild(eventZone);
 }
 
 function renderHand(role) {
@@ -793,15 +788,29 @@ function closeZoneModal() {
 function renderStats(role) {
   const ownerId = role === "me" ? myPlayerId : opponentId();
   const player = game.players[ownerId];
+
+  // 常設のミニステータス(HP・コスト・後攻追加ドロー)
   const el = document.getElementById(`stats-${role}`);
-  el.innerHTML = `HP: <b>${player.hp}</b> ／ シールド: <b>${player.shield}</b> ／ コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b> ／
-    デッキ: <span class="zone-link" data-zone="deck">${player.deck.length}</span> ／
-    ストレージ: <span class="zone-link" data-zone="storage">${player.storage.length}</span> ／
-    墓地: <span class="zone-link" data-zone="graveyard">${player.graveyard.length}</span> ／
-    除外: <span class="zone-link" data-zone="exile">${(player.exile ?? []).length}</span>`;
-  for (const link of el.querySelectorAll(".zone-link")) {
-    link.onclick = () => openZoneModal(ownerId, link.dataset.zone);
-  }
+  el.innerHTML = `HP: <b>${player.hp}</b> ／ コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b>`;
+
+  // 盤面まわりの常設ゾーン(シールド・超越・ストレージ・除外・墓地・デッキ)
+  document.getElementById(`shield-value-${role}`).textContent = player.shield;
+
+  const trStatus = game.playerTranscendAvailability(ownerId);
+  const trBox = document.getElementById(`transcend-box-${role}`);
+  const trValue = document.getElementById(`transcend-value-${role}`);
+  trBox.classList.toggle("available", trStatus.available);
+  trValue.textContent = trStatus.available ? "使用可能" : `あと${trStatus.turnsLeft}ターン`;
+
+  document.getElementById(`storage-count-${role}`).textContent = player.storage.length;
+  document.getElementById(`exile-count-${role}`).textContent = (player.exile ?? []).length;
+  document.getElementById(`graveyard-count-${role}`).textContent = player.graveyard.length;
+  document.getElementById(`deck-count-${role}`).textContent = player.deck.length;
+
+  document.getElementById(`storage-zone-${role}`).onclick = () => openZoneModal(ownerId, "storage");
+  document.getElementById(`exile-zone-${role}`).onclick = () => openZoneModal(ownerId, "exile");
+  document.getElementById(`graveyard-zone-${role}`).onclick = () => openZoneModal(ownerId, "graveyard");
+  document.getElementById(`deck-zone-${role}`).onclick = () => openZoneModal(ownerId, "deck");
 
   if (role === "me" && ownerId === game.secondPlayerId) {
     const canUse =
