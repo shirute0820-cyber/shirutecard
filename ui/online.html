@@ -60,16 +60,24 @@
   #deck-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .deck-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 6px;
     padding: 8px 10px;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 6px;
   }
   .deck-row.active { border-color: var(--accent); }
-  .deck-row .deck-name { font-weight: 600; flex: 1; }
-  .deck-row .deck-meta { font-size: 11px; color: var(--muted); }
+  .deck-row-top { display: flex; align-items: center; gap: 8px; }
+  .deck-row-bottom { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .deck-row .deck-name {
+    font-weight: 700;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .deck-row .deck-meta { color: var(--muted); font-size: 11px; }
   .deck-row .deck-meta.ng { color: var(--danger); }
   .deck-row button {
     background: var(--accent2);
@@ -88,6 +96,7 @@
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 10px;
+    flex-shrink: 0;
   }
   #deck-summary {
     position: sticky;
@@ -152,7 +161,11 @@
     <h2>1. Firebase設定を貼り付けて接続</h2>
     <p style="font-size:12px;color:var(--muted);">Firebaseコンソールの「プロジェクトの設定」→「全般」→「マイアプリ」にある firebaseConfig オブジェクトをそのまま貼り付けてください(前回の対戦ツールと同様、毎回手動で入力する想定です)。</p>
     <textarea id="firebase-config-input" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "...", "projectId": "..." }'></textarea>
-    <div class="row"><button id="btn-connect">接続</button></div>
+    <div class="row">
+      <button id="btn-connect">接続</button>
+      <button id="btn-forget-firebase-config">保存した設定を消去</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:2px;">一度接続すると、次回以降はこのブラウザに設定が保存され自動的に接続されます。</p>
 
     <h2 style="margin-top:20px;">2. デッキを準備する</h2>
     <p style="font-size:12px;color:var(--muted);">複数のデッキを保存できます。対戦で使うのは「アクティブ」に設定したデッキです(このブラウザに保存され、次回以降も残ります)。</p>
