@@ -599,7 +599,7 @@ function render() {
   document.getElementById("btn-end-turn").style.display = isMyAction && !keepSelection ? "" : "none";
   document.getElementById("btn-confirm-keep").style.display = keepSelection ? "" : "none";
   document.getElementById("selection-info").textContent = keepSelection
-    ? `次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(未選択のまま確定すると「何も残さない」) / 次ターンのコスト上限:${game.peekNextResourceCap(myPlayerId)}`
+    ? `次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(未選択のまま確定すると「何も残さない」)`
     : selectedAttacker
     ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、またはプレイヤーへ直接攻撃ボタン)`
     : selectedHandCard
