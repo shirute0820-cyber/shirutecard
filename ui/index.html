@@ -15,9 +15,42 @@
   <main>
     <section class="player-area" id="area-p2">
       <h2>Player 2</h2>
-      <div class="stats" id="stats-p2"></div>
-      <div class="board" id="board-p2"></div>
-      <div class="hand" id="hand-p2"></div>
+      <div class="mini-stats" id="stats-p2"></div>
+      <div class="board-layout">
+        <div class="side-col left-col">
+          <div class="zone-box shield-box">
+            <div class="zone-label">シールド</div>
+            <div class="zone-value shield-value" id="shield-value-p2">0</div>
+          </div>
+          <div class="zone-box transcend-box" id="transcend-box-p2">
+            <div class="zone-label">超越</div>
+            <div class="zone-value" id="transcend-value-p2">-</div>
+          </div>
+          <div class="zone-box clickable-zone" id="storage-zone-p2">
+            <div class="zone-label">ストレージ</div>
+            <div class="zone-value" id="storage-count-p2">0</div>
+          </div>
+        </div>
+        <div class="board-row" id="board-p2"></div>
+        <div class="zone-box event-zone-box">
+          <div class="zone-label">イベント<br />ゾーン</div>
+        </div>
+        <div class="side-col right-stack">
+          <div class="zone-box clickable-zone" id="exile-zone-p2">
+            <div class="zone-label">除外</div>
+            <div class="zone-value" id="exile-count-p2">0</div>
+          </div>
+          <div class="zone-box clickable-zone" id="graveyard-zone-p2">
+            <div class="zone-label">墓地</div>
+            <div class="zone-value" id="graveyard-count-p2">0</div>
+          </div>
+        </div>
+        <div class="hand-row" id="hand-p2"></div>
+        <div class="zone-box clickable-zone deck-zone-box" id="deck-zone-p2">
+          <div class="zone-label">デッキ</div>
+          <div class="zone-value" id="deck-count-p2">0</div>
+        </div>
+      </div>
     </section>
 
     <section class="controls">
@@ -32,9 +65,42 @@
 
     <section class="player-area" id="area-p1">
       <h2>Player 1</h2>
-      <div class="stats" id="stats-p1"></div>
-      <div class="board" id="board-p1"></div>
-      <div class="hand" id="hand-p1"></div>
+      <div class="board-layout">
+        <div class="side-col left-col">
+          <div class="zone-box shield-box">
+            <div class="zone-label">シールド</div>
+            <div class="zone-value shield-value" id="shield-value-p1">0</div>
+          </div>
+          <div class="zone-box transcend-box" id="transcend-box-p1">
+            <div class="zone-label">超越</div>
+            <div class="zone-value" id="transcend-value-p1">-</div>
+          </div>
+          <div class="zone-box clickable-zone" id="storage-zone-p1">
+            <div class="zone-label">ストレージ</div>
+            <div class="zone-value" id="storage-count-p1">0</div>
+          </div>
+        </div>
+        <div class="board-row" id="board-p1"></div>
+        <div class="zone-box event-zone-box">
+          <div class="zone-label">イベント<br />ゾーン</div>
+        </div>
+        <div class="side-col right-stack">
+          <div class="zone-box clickable-zone" id="exile-zone-p1">
+            <div class="zone-label">除外</div>
+            <div class="zone-value" id="exile-count-p1">0</div>
+          </div>
+          <div class="zone-box clickable-zone" id="graveyard-zone-p1">
+            <div class="zone-label">墓地</div>
+            <div class="zone-value" id="graveyard-count-p1">0</div>
+          </div>
+        </div>
+        <div class="hand-row" id="hand-p1"></div>
+        <div class="zone-box clickable-zone deck-zone-box" id="deck-zone-p1">
+          <div class="zone-label">デッキ</div>
+          <div class="zone-value" id="deck-count-p1">0</div>
+        </div>
+      </div>
+      <div class="mini-stats" id="stats-p1"></div>
     </section>
   </main>
 
