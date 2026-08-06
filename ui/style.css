@@ -104,6 +104,11 @@ main {
   padding: 2px 4px;
   cursor: pointer;
 }
+.card .tr-countdown {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
 
 .controls {
   display: flex;
