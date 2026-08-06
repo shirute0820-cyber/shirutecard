@@ -389,6 +389,18 @@ export class GameState {
     return { usedUp: false, available: turnsLeft === 0, turnsLeft };
   }
 
+  // UI表示用(プレイヤー単位のサマリー): 個々のモンスターの「超越済みか」は考慮せず、
+  // 「解禁ターンに達しているか」「クールダウン中でないか」という、このプレイヤー全体に
+  // 共通する2つの条件だけで、超越が使える状態かどうかを返す。
+  // (盤面左列に常設する「超越」ステータス表示用。対象モンスターがまだ1体もいなくても表示できる)
+  playerTranscendAvailability(playerId) {
+    const player = this.players[playerId];
+    const turnGate = Math.max(0, CONFIG.TRANSCEND_MIN_TURN - this.turnNumber);
+    const cooldownGate = Math.max(0, player.transcendCooldownUntilOwnTurn - player.ownTurnCount);
+    const turnsLeft = Math.max(turnGate, cooldownGate);
+    return { available: turnsLeft === 0, turnsLeft };
+  }
+
   useTranscend(playerId, instance, params = {}) {
     if (!this.canTranscend(playerId, instance)) throw new Error("超越を使用できません");
     const player = this.players[playerId];
