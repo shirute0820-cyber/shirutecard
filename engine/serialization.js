@@ -91,7 +91,8 @@ function serializePlayer(p) {
     ownTurnCount: p.ownTurnCount,
     resourceCap: p.resourceCap,
     resourceAvailable: p.resourceAvailable,
-    transcendCooldownUntilGlobalTurn: p.transcendCooldownUntilGlobalTurn,
+    transcendCooldownUntilOwnTurn: p.transcendCooldownUntilOwnTurn,
+    exile: [...p.exile],
     secondPlayerBonusDrawsRemaining: p.secondPlayerBonusDrawsRemaining,
     secondPlayerBonusDrawUsedThisTurn: p.secondPlayerBonusDrawUsedThisTurn,
   };
@@ -134,7 +135,7 @@ export function serializeGame(game) {
     },
     firstPlayerId: game.firstPlayerId,
     secondPlayerId: game.secondPlayerId,
-    globalTurn: game.globalTurn,
+    turnNumber: game.turnNumber,
     activePlayerId: game.activePlayerId,
     pendingNextPlayerId: game.pendingNextPlayerId ?? null,
     phase: game.phase,
@@ -162,7 +163,7 @@ export function hydrateGame(snapshot, { log = () => {} } = {}) {
   game.players.p1 = deserializePlayer(snapshot.players.p1);
   game.players.p2 = deserializePlayer(snapshot.players.p2);
   game.secondPlayerId = snapshot.secondPlayerId;
-  game.globalTurn = snapshot.globalTurn;
+  game.turnNumber = snapshot.turnNumber ?? 0;
   game.activePlayerId = snapshot.activePlayerId ?? null;
   game.pendingNextPlayerId = snapshot.pendingNextPlayerId ?? null;
   game.phase = snapshot.phase ?? null;
