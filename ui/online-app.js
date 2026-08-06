@@ -56,6 +56,7 @@ document.getElementById("btn-connect").onclick = async () => {
     document.getElementById("room-code-input").disabled = false;
     document.getElementById("btn-create-room").disabled = false;
     document.getElementById("btn-join-room").disabled = false;
+    document.getElementById("btn-rejoin-host").disabled = false;
   } catch (err) {
     status.textContent = `接続エラー: ${err.message}\n(貼り付けたJSONの形式や、Realtime Databaseが有効になっているか確認してください)`;
   }
@@ -65,6 +66,20 @@ document.getElementById("btn-create-room").onclick = async () => {
   const status = document.getElementById("setup-status");
   roomCode = document.getElementById("room-code-input").value.trim() || `room-${Date.now()}`;
   myPlayerId = "p1";
+
+  try {
+    // 既に同じ部屋コードが存在する場合、誤って上書き(ゲームリセット)しないようにする。
+    // 再接続したい場合は「参加する」を使う。
+    const existingSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
+    if (existingSnap.exists()) {
+      status.textContent =
+        "この部屋コードは既に使われています。再接続したい場合は「参加する」を使ってください(「部屋を作る」を押すとゲームが最初からリセットされます)。";
+      return;
+    }
+  } catch (err) {
+    status.textContent = `確認エラー: ${err.message}`;
+    return;
+  }
 
   game = new GameState({
     player1Deck: buildSampleDeck(),
@@ -86,13 +101,21 @@ document.getElementById("btn-create-room").onclick = async () => {
 };
 
 document.getElementById("btn-join-room").onclick = async () => {
+  await connectExistingRoom("p2", { markGuestConnected: true });
+};
+
+document.getElementById("btn-rejoin-host").onclick = async () => {
+  await connectExistingRoom("p1", { markGuestConnected: false });
+};
+
+async function connectExistingRoom(playerId, { markGuestConnected }) {
   const status = document.getElementById("setup-status");
   roomCode = document.getElementById("room-code-input").value.trim();
   if (!roomCode) {
     status.textContent = "部屋コードを入力してください。";
     return;
   }
-  myPlayerId = "p2";
+  myPlayerId = playerId;
 
   try {
     const snap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
@@ -101,13 +124,15 @@ document.getElementById("btn-join-room").onclick = async () => {
       return;
     }
     game = hydrateGame(snap.val(), { log: pushLog });
-    await dbRefFns.update(dbRefFns.ref(db, `rooms/${roomCode}/meta`), { guestConnected: true });
+    if (markGuestConnected) {
+      await dbRefFns.update(dbRefFns.ref(db, `rooms/${roomCode}/meta`), { guestConnected: true });
+    }
     subscribeToRoom();
     enterGameScreen();
   } catch (err) {
     status.textContent = `参加エラー: ${err.message}`;
   }
-};
+}
 
 function subscribeToRoom() {
   dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/state`), (snap) => {
@@ -169,11 +194,14 @@ let selectedAttacker = null;
 let keepSelection = null;
 let mulliganReturn = new Set();
 
+const CANCELLED = Symbol("cancelled");
+
 function pickMonster(candidates, label) {
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
   const listText = candidates.map((m, i) => `${i}: ${m.defName} (${m.currentAtk}/${m.currentHp})`).join("\n");
   const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
+  if (input === null) return CANCELLED;
   const idx = Number(input);
   return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
 }
@@ -182,20 +210,57 @@ function pickHandCard(candidates, label) {
   if (candidates.length === 1) return candidates[0];
   const listText = candidates.map((c, i) => `${i}: ${c.defName}`).join("\n");
   const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
+  if (input === null) return CANCELLED;
   const idx = Number(input);
   return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
 }
 const PARAM_BUILDERS = {
-  投石: ({ opponent }) => ({ targetMonster: pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター") }),
-  ドラゴンの眼光: ({ opponent }) => ({ targetMonster: pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター") }),
-  用意周到: ({ player }) => ({ targetHandUid: pickHandCard(player.hand, "保留を付与する手札")?.uid }),
-  ドラゴンの血誓: ({ player }) => ({
-    discardHandUid: pickHandCard(player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札")?.uid,
-  }),
-  滝の試練: ({ player }) => ({ discardHandUid: pickHandCard(player.hand, "捨てる手札")?.uid }),
-  リバーススケイル: ({ player }) => ({
-    targetMonster: pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター"),
-  }),
+  投石: ({ opponent }) => {
+    const t = pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  ドラゴンの眼光: ({ opponent }) => {
+    const t = pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  用意周到: ({ player }) => {
+    const c = pickHandCard(player.hand, "保留を付与する手札");
+    if (c === CANCELLED) return null;
+    return { targetHandUid: c?.uid };
+  },
+  ドラゴンの血誓: ({ player }) => {
+    const c = pickHandCard(player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
+    if (c === CANCELLED) return null;
+    return { discardHandUid: c?.uid };
+  },
+  滝の試練: ({ player }) => {
+    const c = pickHandCard(player.hand, "捨てる手札");
+    if (c === CANCELLED) return null;
+    return { discardHandUid: c?.uid };
+  },
+  リバーススケイル: ({ player }) => {
+    const t = pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+};
+
+const TRANSCEND_PARAM_BUILDERS = {
+  福音受けし者: ({ opponent }) => {
+    const t = pickMonster(opponent.board.filter(Boolean), "《超越》で破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  老練の竜使い: ({ player }) => {
+    const t = pickMonster(
+      player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")),
+      "《超越》で貫通を付与する自分のドラゴン・亜竜種"
+    );
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
 };
 
 function keywordSet(instance) {
@@ -210,7 +275,7 @@ function renderMonsterCard(ownerId, instance) {
   el.className = "card";
   const kws = [...keywordSet(instance)];
   const sick =
-    instance.summonedOnTurn === game.globalTurn && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
+    instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
   if (sick) el.classList.add("sick");
   if (selectedAttacker === instance) el.classList.add("selected");
   el.innerHTML = `<div class="name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>`;
@@ -224,8 +289,13 @@ function renderMonsterCard(ownerId, instance) {
       btn.textContent = "超越";
       btn.onclick = async (e) => {
         e.stopPropagation();
+        const player = game.players[myPlayerId];
+        const opponent = game.players[opponentId()];
+        const builder = TRANSCEND_PARAM_BUILDERS[instance.defName];
+        const params = builder ? builder({ player, opponent }) : {};
+        if (params === null) return; // 対象選択をキャンセル → 超越自体を中断
         try {
-          game.useTranscend(myPlayerId, instance, {});
+          game.useTranscend(myPlayerId, instance, params);
           await pushState();
         } catch (err) {
           alert(err.message);
@@ -281,6 +351,11 @@ function renderBoard(role) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[selectedHandCard.defName];
           const params = builder ? builder({ player, opponent }) : {};
+          if (params === null) {
+            // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
+            render();
+            return;
+          }
           try {
             game.summonFromHand(myPlayerId, selectedHandCard.uid, slot, params);
             await pushState();
@@ -381,6 +456,7 @@ function renderHand(role) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
           const params = builder ? builder({ player, opponent }) : {};
+          if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
           try {
             game.playEvent(myPlayerId, c.uid, params);
             await pushState();
@@ -394,6 +470,7 @@ function renderHand(role) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
           const params = builder ? builder({ player, opponent }) : {};
+          if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
           try {
             game.summonFromHand(myPlayerId, c.uid, null, params);
             await pushState();
@@ -411,11 +488,45 @@ function renderHand(role) {
   }
 }
 
+const ZONE_LABELS = { deck: "デッキ", storage: "ストレージ", graveyard: "墓地", exile: "除外" };
+
+function openZoneModal(playerId, zoneKey) {
+  const player = game.players[playerId];
+  const cards = player[zoneKey] ?? [];
+  const counts = new Map();
+  for (const name of cards) counts.set(name, (counts.get(name) ?? 0) + 1);
+
+  document.getElementById("zone-modal-title").textContent = `${playerId} の${ZONE_LABELS[zoneKey] ?? zoneKey}(${cards.length}枚)`;
+  const contentEl = document.getElementById("zone-modal-content");
+  contentEl.innerHTML = "";
+  if (counts.size === 0) {
+    contentEl.innerHTML = "<div>(空)</div>";
+  } else {
+    for (const [name, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const row = document.createElement("div");
+      row.textContent = count > 1 ? `${name} ×${count}` : name;
+      contentEl.appendChild(row);
+    }
+  }
+  document.getElementById("zone-modal-overlay").style.display = "flex";
+}
+
+function closeZoneModal() {
+  document.getElementById("zone-modal-overlay").style.display = "none";
+}
+
 function renderStats(role) {
   const ownerId = role === "me" ? myPlayerId : opponentId();
   const player = game.players[ownerId];
   const el = document.getElementById(`stats-${role}`);
-  el.innerHTML = `HP: <b>${player.hp}</b> ／ シールド: <b>${player.shield}</b> ／ コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b> ／ デッキ: ${player.deck.length} ／ ストレージ: ${player.storage.length} ／ 墓地: ${player.graveyard.length}`;
+  el.innerHTML = `HP: <b>${player.hp}</b> ／ シールド: <b>${player.shield}</b> ／ コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b> ／
+    デッキ: <span class="zone-link" data-zone="deck">${player.deck.length}</span> ／
+    ストレージ: <span class="zone-link" data-zone="storage">${player.storage.length}</span> ／
+    墓地: <span class="zone-link" data-zone="graveyard">${player.graveyard.length}</span> ／
+    除外: <span class="zone-link" data-zone="exile">${(player.exile ?? []).length}</span>`;
+  for (const link of el.querySelectorAll(".zone-link")) {
+    link.onclick = () => openZoneModal(ownerId, link.dataset.zone);
+  }
 
   if (role === "me" && ownerId === game.secondPlayerId) {
     const canUse =
@@ -474,7 +585,7 @@ function render() {
   document.getElementById("turn-info").textContent =
     game.phase === "between"
       ? "手番切り替え中..."
-      : `グローバルターン${game.globalTurn} / ${game.activePlayerId === myPlayerId ? "あなたの番" : "相手の番"}(フェイズ:${game.phase})`;
+      : `ターン${game.turnNumber} / ${game.activePlayerId === myPlayerId ? "あなたの番" : "相手の番"}(フェイズ:${game.phase})`;
 
   renderStats("me");
   renderStats("opponent");
@@ -488,7 +599,7 @@ function render() {
   document.getElementById("btn-end-turn").style.display = isMyAction && !keepSelection ? "" : "none";
   document.getElementById("btn-confirm-keep").style.display = keepSelection ? "" : "none";
   document.getElementById("selection-info").textContent = keepSelection
-    ? `次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(未選択のまま確定すると「何も残さない」)`
+    ? `次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(未選択のまま確定すると「何も残さない」) / 次ターンのコスト上限:${game.peekNextResourceCap(myPlayerId)}`
     : selectedAttacker
     ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、またはプレイヤーへ直接攻撃ボタン)`
     : selectedHandCard
@@ -583,4 +694,9 @@ document.getElementById("btn-cancel-select").onclick = () => {
   selectedAttacker = null;
   selectedHandCard = null;
   render();
+};
+
+document.getElementById("zone-modal-close").onclick = closeZoneModal;
+document.getElementById("zone-modal-overlay").onclick = (e) => {
+  if (e.target.id === "zone-modal-overlay") closeZoneModal();
 };
