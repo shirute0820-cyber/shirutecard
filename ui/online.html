@@ -56,6 +56,39 @@
 
   #deck-screen { display: none; max-width: 900px; margin: 30px auto; padding: 20px; }
   #deck-screen h2 { font-size: 16px; }
+
+  #deck-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .deck-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .deck-row.active { border-color: var(--accent); }
+  .deck-row .deck-name { font-weight: 600; flex: 1; }
+  .deck-row .deck-meta { font-size: 11px; color: var(--muted); }
+  .deck-row .deck-meta.ng { color: var(--danger); }
+  .deck-row button {
+    background: var(--accent2);
+    border: none;
+    color: #1a1a1a;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .deck-row button.danger { background: var(--danger); }
+  .deck-row .active-badge {
+    background: var(--accent);
+    color: #1a1a1a;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+  }
   #deck-summary {
     position: sticky;
     top: 0;
@@ -119,10 +152,10 @@
     <div class="row"><button id="btn-connect">接続</button></div>
 
     <h2 style="margin-top:20px;">2. デッキを準備する</h2>
-    <p style="font-size:12px;color:var(--muted);">40枚ちょうどのデッキを組んでください(このブラウザに保存され、次回以降は自動で読み込まれます)。</p>
-    <div class="row">
-      <button id="btn-open-deck-builder">デッキを編集する</button>
-      <span id="deck-status-label" style="font-size:12px;color:var(--muted);align-self:center;"></span>
+    <p style="font-size:12px;color:var(--muted);">複数のデッキを保存できます。対戦で使うのは「アクティブ」に設定したデッキです(このブラウザに保存され、次回以降も残ります)。</p>
+    <div id="deck-list"></div>
+    <div class="row" style="margin-top:8px;">
+      <button id="btn-new-deck">+ 新しいデッキを作る</button>
     </div>
 
     <h2 style="margin-top:20px;">3. 部屋を作る/参加する</h2>
@@ -139,7 +172,10 @@
   </div>
 
   <div id="deck-screen">
-    <h2>デッキ構築(40枚ちょうど)</h2>
+    <h2>
+      <input type="text" id="deck-name-input" placeholder="デッキ名" style="font-size:16px;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);padding:2px 4px;width:240px;" />
+      (40枚ちょうど)
+    </h2>
     <div id="deck-summary">
       <span class="count" id="deck-count">0/40</span>
       <button id="btn-deck-save" disabled>保存してホームに戻る</button>
