@@ -44,13 +44,13 @@ document.getElementById("btn-connect").onclick = async () => {
     const firebaseConfig = JSON.parse(configText);
 
     const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const { getDatabase, ref, set, onValue, get, update } = await import(
+    const { getDatabase, ref, set, onValue, get, update, runTransaction } = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"
     );
 
     const app = initializeApp(firebaseConfig);
     db = getDatabase(app);
-    dbRefFns = { ref, set, onValue, get, update };
+    dbRefFns = { ref, set, onValue, get, update, runTransaction };
 
     status.textContent = "接続しました。部屋を作るか参加してください。";
     document.getElementById("room-code-input").disabled = false;
@@ -510,15 +510,30 @@ function render() {
 // ボタン操作
 // ==========================================================
 document.getElementById("btn-mulligan-me").onclick = async () => {
+  const returnUids = [...mulliganReturn];
+  // 通常のpushState(その場の内容を丸ごと書き込む方式)ではなく、Firebase側の
+  // 「今まさに保存されている最新の状態」を見てから計算するトランザクションを使う。
+  // 相手も同じタイミングでマリガンを確定した場合、お互いの書き込みが
+  // 上書きし合って片方の完了フラグが消えてしまう競合を避けるため。
   try {
-    game.mulligan(myPlayerId, [...mulliganReturn]);
-    await pushState();
+    const stateRef = dbRefFns.ref(db, `rooms/${roomCode}/state`);
+    const result = await dbRefFns.runTransaction(stateRef, (currentData) => {
+      if (currentData === null) return currentData; // 部屋がまだ存在しない(異常系)ので何もしない
+      const tempGame = hydrateGame(currentData, { log: () => {} });
+      if (tempGame.mulliganDone[myPlayerId]) return currentData; // 既に確定済みなら変更しない(再試行対策)
+      tempGame.mulligan(myPlayerId, returnUids);
+      return serializeGame(tempGame);
+    });
+    if (result.committed && result.snapshot.exists()) {
+      game = hydrateGame(result.snapshot.val(), { log: pushLog });
+    }
   } catch (err) {
     alert(err.message);
     return;
   }
   mulliganReturn = new Set();
   render();
+  await maybeStartMyTurn();
 };
 
 document.getElementById("btn-end-turn").onclick = async () => {
