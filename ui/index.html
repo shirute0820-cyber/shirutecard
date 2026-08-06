@@ -3,46 +3,125 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>カードゲーム デバッグ画面</title>
+<title>カードゲーム オンライン対戦</title>
 <link rel="stylesheet" href="style.css" />
+<style>
+  #setup-screen {
+    max-width: 560px;
+    margin: 60px auto;
+    padding: 24px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  #setup-screen h2 { margin-top: 0; font-size: 16px; }
+  #setup-screen textarea {
+    width: 100%;
+    min-height: 100px;
+    background: #14171c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: monospace;
+    font-size: 12px;
+  }
+  #setup-screen input[type="text"] {
+    width: 100%;
+    padding: 8px;
+    background: #14171c;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 6px 0;
+  }
+  #setup-screen .row { display: flex; gap: 8px; margin-top: 6px; }
+  #setup-screen button {
+    background: var(--accent);
+    border: none;
+    color: #1a1a1a;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #setup-status { font-size: 12px; color: var(--muted); margin-top: 8px; white-space: pre-wrap; }
+  #game-screen { display: none; }
+  .hidden-hand-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: repeating-linear-gradient(45deg, #262b34, #262b34 6px, #2c323d 6px, #2c323d 12px);
+    min-height: 64px;
+  }
+</style>
 </head>
 <body>
-  <header>
-    <h1>カードゲーム デバッグ画面 <span class="sub">(1人で両プレイヤーを操作するローカル検証用)</span></h1>
-    <div id="turn-info"></div>
-  </header>
+  <div id="setup-screen">
+    <h2>1. Firebase設定を貼り付けて接続</h2>
+    <p style="font-size:12px;color:var(--muted);">Firebaseコンソールの「プロジェクトの設定」→「全般」→「マイアプリ」にある firebaseConfig オブジェクトをそのまま貼り付けてください(前回の対戦ツールと同様、毎回手動で入力する想定です)。</p>
+    <textarea id="firebase-config-input" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "...", "projectId": "..." }'></textarea>
+    <div class="row"><button id="btn-connect">接続</button></div>
 
-  <main>
-    <section class="player-area" id="area-p2">
-      <h2>Player 2</h2>
-      <div class="stats" id="stats-p2"></div>
-      <div class="board" id="board-p2"></div>
-      <div class="hand" id="hand-p2"></div>
-    </section>
+    <h2 style="margin-top:20px;">2. 部屋を作る/参加する</h2>
+    <input type="text" id="room-code-input" placeholder="部屋コード(例: sample-room-1)" disabled />
+    <div class="row">
+      <button id="btn-create-room" disabled>部屋を作る(新規・先攻になります)</button>
+      <button id="btn-join-room" disabled>参加する(後攻になります)</button>
+      <button id="btn-rejoin-host" disabled>先攻として再接続する</button>
+    </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:4px;">
+      切断後に再び入る場合は、後攻なら「参加する」、先攻なら「先攻として再接続する」を使ってください(「部屋を作る」は新しい部屋を作るときだけ使用)。
+    </p>
+    <div id="setup-status"></div>
+  </div>
 
-    <section class="controls">
-      <button id="btn-mulligan-p1" style="display:none;">P1: マリガン確定</button>
-      <button id="btn-mulligan-p2" style="display:none;">P2: マリガン確定</button>
-      <button id="btn-end-turn">ターン終了</button>
-      <button id="btn-confirm-keep" style="display:none;">選択を確定(未選択なら「何も残さない」)</button>
-      <button id="btn-attack-face" disabled>選択中のモンスターでプレイヤーへ直接攻撃</button>
-      <button id="btn-cancel-select">選択解除</button>
-      <div id="selection-info"></div>
-    </section>
+  <div id="game-screen">
+    <header>
+      <h1>カードゲーム オンライン対戦 <span class="sub" id="my-role-label"></span></h1>
+      <div id="turn-info"></div>
+    </header>
 
-    <section class="player-area" id="area-p1">
-      <h2>Player 1</h2>
-      <div class="stats" id="stats-p1"></div>
-      <div class="board" id="board-p1"></div>
-      <div class="hand" id="hand-p1"></div>
-    </section>
-  </main>
+    <main>
+      <section class="player-area" id="area-opponent">
+        <h2 id="opponent-label">相手</h2>
+        <div class="stats" id="stats-opponent"></div>
+        <div class="board" id="board-opponent"></div>
+        <div class="hand" id="hand-opponent"></div>
+      </section>
 
-  <aside id="log-panel">
-    <h3>ログ</h3>
-    <div id="log-content"></div>
-  </aside>
+      <section class="controls">
+        <button id="btn-mulligan-me" style="display:none;">マリガン確定</button>
+        <button id="btn-end-turn">ターン終了</button>
+        <button id="btn-confirm-keep" style="display:none;">選択を確定(未選択なら「何も残さない」)</button>
+        <button id="btn-attack-face" disabled>選択中のモンスターでプレイヤーへ直接攻撃</button>
+        <button id="btn-cancel-select">選択解除</button>
+        <div id="selection-info"></div>
+      </section>
 
-  <script type="module" src="app.js"></script>
+      <section class="player-area" id="area-me">
+        <h2 id="me-label">自分</h2>
+        <div class="stats" id="stats-me"></div>
+        <div class="board" id="board-me"></div>
+        <div class="hand" id="hand-me"></div>
+      </section>
+    </main>
+
+    <aside id="log-panel">
+      <h3>ログ</h3>
+      <div id="log-content"></div>
+    </aside>
+  </div>
+
+  <div id="zone-modal-overlay" style="display:none;">
+    <div id="zone-modal">
+      <div id="zone-modal-header">
+        <span id="zone-modal-title"></span>
+        <button id="zone-modal-close">閉じる</button>
+      </div>
+      <div id="zone-modal-content"></div>
+    </div>
+  </div>
+
+  <script type="module" src="online-app.js"></script>
 </body>
 </html>
