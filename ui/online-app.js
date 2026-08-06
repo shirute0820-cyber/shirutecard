@@ -62,23 +62,22 @@ function renderDeckList() {
       <span class="deck-name">${d.name}</span>
       <span class="deck-meta ${d.valid ? "" : "ng"}">${d.total}/${DECK_SIZE}枚${d.valid ? "" : "(未完成)"}</span>
       <button data-action="select" ${isActive ? "disabled" : ""}>これを使う</button>
-      <button data-action="edit">編集</button>
-      <button data-action="rename">名前変更</button>
+      <button data-action="edit">編集(名前変更も可)</button>
       <button data-action="delete" class="danger">削除</button>
+      <button data-action="delete-confirm" class="danger" style="display:none;">本当に削除</button>
     `;
     row.querySelector('[data-action="select"]').onclick = () => {
       setActiveDeckId(d.id);
       renderDeckList();
     };
     row.querySelector('[data-action="edit"]').onclick = () => openDeckBuilder(d.id);
-    row.querySelector('[data-action="rename"]').onclick = () => {
-      const newName = window.prompt("新しいデッキ名を入力してください", d.name);
-      if (newName === null) return;
-      renameDeck(d.id, newName);
-      renderDeckList();
-    };
+    // window.confirm はブラウザ環境によっては動作しないため、
+    // ボタンを2段階(削除 → 本当に削除)にして代替する
     row.querySelector('[data-action="delete"]').onclick = () => {
-      if (!window.confirm(`『${d.name}』を削除します。よろしいですか?`)) return;
+      row.querySelector('[data-action="delete"]').style.display = "none";
+      row.querySelector('[data-action="delete-confirm"]').style.display = "";
+    };
+    row.querySelector('[data-action="delete-confirm"]').onclick = () => {
       deleteDeck(d.id);
       renderDeckList();
     };
@@ -87,9 +86,9 @@ function renderDeckList() {
 }
 
 document.getElementById("btn-new-deck").onclick = () => {
-  const name = window.prompt("デッキ名を入力してください", `新しいデッキ${listDecks().length + 1}`);
-  if (name === null) return;
-  const id = createDeck(name);
+  // window.prompt はブラウザ環境によっては動作しないため使わない。
+  // 仮の名前で作成し、編集画面(名前欄あり)を開く
+  const id = createDeck(`新しいデッキ${listDecks().length + 1}`);
   openDeckBuilder(id);
 };
 
