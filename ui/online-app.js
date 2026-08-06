@@ -66,6 +66,7 @@ document.getElementById("btn-create-room").onclick = async () => {
   const status = document.getElementById("setup-status");
   roomCode = document.getElementById("room-code-input").value.trim() || `room-${Date.now()}`;
   myPlayerId = "p1";
+  roomWasReset = false;
 
   try {
     // 既に同じ部屋コードが存在する場合、誤って上書き(ゲームリセット)しないようにする。
@@ -116,6 +117,7 @@ async function connectExistingRoom(playerId, { markGuestConnected }) {
     return;
   }
   myPlayerId = playerId;
+  roomWasReset = false;
 
   try {
     const snap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
@@ -134,9 +136,18 @@ async function connectExistingRoom(playerId, { markGuestConnected }) {
   }
 }
 
+let roomWasReset = false; // 自分/相手がホームに戻って部屋をリセットした後、二重処理を防ぐフラグ
+
 function subscribeToRoom() {
   dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/state`), (snap) => {
-    if (!snap.exists()) return;
+    if (!snap.exists()) {
+      // 部屋が削除された(誰かが「ホーム画面に戻る」を押した)場合、
+      // まだゲーム画面にいるならホームに戻す。既に自分でリセット済みなら何もしない。
+      if (!roomWasReset && game) {
+        returnToHomeScreen("相手がホーム画面に戻ったため、この対戦は終了しました。");
+      }
+      return;
+    }
     if (suppressNextPush) {
       suppressNextPush = false;
       return;
@@ -182,6 +193,39 @@ function enterGameScreen() {
   maybeStartMyTurn();
 }
 
+// ゲーム画面からホーム画面(部屋作成/参加の入力画面)へ戻る。
+// ローカルの状態をきれいにリセットするだけで、Firebase側のデータには触れない
+// (部屋の削除はbtn-return-homeのクリック時のみ、かつ1回だけ行う)。
+function returnToHomeScreen(message) {
+  roomWasReset = true;
+  game = null;
+  selectedAttacker = null;
+  selectedHandCard = null;
+  keepSelection = null;
+  mulliganReturn = new Set();
+
+  const banner = document.querySelector(".winner-banner");
+  if (banner) banner.remove();
+
+  document.getElementById("game-screen").style.display = "none";
+  document.getElementById("setup-screen").style.display = "block";
+  document.getElementById("setup-status").textContent = message ?? "";
+}
+
+document.getElementById("btn-return-home").onclick = async () => {
+  const code = roomCode;
+  // 先にローカルをホーム画面へ戻してから、Firebase側の部屋データを削除する。
+  // (削除に失敗しても、少なくとも自分はホームに戻れる状態にしておく)
+  returnToHomeScreen("部屋をリセットしてホーム画面に戻りました。");
+  try {
+    await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/state`), null);
+    await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/meta`), null);
+  } catch (err) {
+    // 削除に失敗しても、既にローカルはホーム画面に戻っているので致命的ではない
+    console.error("部屋の削除に失敗しました:", err);
+  }
+};
+
 function opponentId() {
   return myPlayerId === "p1" ? "p2" : "p1";
 }
@@ -225,18 +269,18 @@ const PARAM_BUILDERS = {
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
-  用意周到: ({ player }) => {
-    const c = pickHandCard(player.hand, "保留を付与する手札");
+  用意周到: ({ player, selfUid }) => {
+    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "保留を付与する手札");
     if (c === CANCELLED) return null;
     return { targetHandUid: c?.uid };
   },
-  ドラゴンの血誓: ({ player }) => {
-    const c = pickHandCard(player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
+  ドラゴンの血誓: ({ player, selfUid }) => {
+    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
-  滝の試練: ({ player }) => {
-    const c = pickHandCard(player.hand, "捨てる手札");
+  滝の試練: ({ player, selfUid }) => {
+    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
@@ -280,13 +324,14 @@ function renderMonsterCard(ownerId, instance) {
   if (selectedAttacker === instance) el.classList.add("selected");
   el.innerHTML = `<div class="name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>`;
 
-  const isMyAction = game.gameStarted && game.activePlayerId === myPlayerId;
+  const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
   if (ownerId === myPlayerId && isMyAction) {
-    if (game.canTranscend(myPlayerId, instance)) {
+    const trStatus = game.transcendStatus(myPlayerId, instance);
+    if (trStatus.available) {
       const btn = document.createElement("button");
       btn.className = "tr-btn";
-      btn.textContent = "超越";
+      btn.textContent = "超越(使用可能)";
       btn.onclick = async (e) => {
         e.stopPropagation();
         const player = game.players[myPlayerId];
@@ -303,6 +348,11 @@ function renderMonsterCard(ownerId, instance) {
         render();
       };
       el.appendChild(btn);
+    } else if (!trStatus.usedUp) {
+      const label = document.createElement("div");
+      label.className = "tr-countdown";
+      label.textContent = `超越まであと${trStatus.turnsLeft}ターン`;
+      el.appendChild(label);
     }
     el.onclick = () => {
       selectedAttacker = selectedAttacker === instance ? null : instance;
@@ -337,7 +387,7 @@ function renderBoard(role) {
   container.innerHTML = "";
   if (!game.gameStarted) return;
   const player = game.players[ownerId];
-  const isMyAction = game.gameStarted && game.activePlayerId === myPlayerId;
+  const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
   player.board.forEach((m, slot) => {
     if (m) {
@@ -350,7 +400,7 @@ function renderBoard(role) {
         el.onclick = async () => {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[selectedHandCard.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
           if (params === null) {
             // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
             render();
@@ -416,9 +466,7 @@ function renderHand(role) {
     return;
   }
 
-  const isMyAction = game.activePlayerId === myPlayerId;
-
-  // 「残す1枚」選択モード(自分の番)
+  const isMyAction = !game.winner && game.activePlayerId === myPlayerId;
   if (keepSelection) {
     for (const c of keepSelection.nonHold) {
       const def = CARD_DEFS[c.defName];
@@ -455,7 +503,7 @@ function renderHand(role) {
         if (def?.type === "イベント") {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
           try {
             game.playEvent(myPlayerId, c.uid, params);
@@ -469,7 +517,7 @@ function renderHand(role) {
         if (def?.releaseRequirement) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
           try {
             game.summonFromHand(myPlayerId, c.uid, null, params);
@@ -589,6 +637,33 @@ function render() {
 
   renderStats("me");
   renderStats("opponent");
+
+  if (game.winner) {
+    // 勝敗が決まったら、盤面・手札は最終状態を表示するだけにして
+    // それ以上の操作は一切受け付けないようにする
+    renderBoard("me");
+    renderBoard("opponent");
+    renderHand("me");
+    renderHand("opponent");
+
+    document.getElementById("btn-attack-face").style.display = "none";
+    document.getElementById("btn-cancel-select").style.display = "none";
+    document.getElementById("btn-end-turn").style.display = "none";
+    document.getElementById("btn-confirm-keep").style.display = "none";
+    document.getElementById("selection-info").textContent = "";
+    document.getElementById("btn-return-home").style.display = "";
+
+    let banner = document.querySelector(".winner-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "winner-banner";
+      document.body.prepend(banner);
+    }
+    banner.textContent = game.winner === myPlayerId ? "あなたの勝利!" : "相手の勝利...";
+    return;
+  }
+
+  document.getElementById("btn-return-home").style.display = "none";
   renderBoard("me");
   renderBoard("opponent");
   renderHand("me");
@@ -605,16 +680,6 @@ function render() {
     : selectedHandCard
     ? `選択中の手札: ${selectedHandCard.defName}(空き枠をクリックして召喚)`
     : "";
-
-  if (game.winner) {
-    let banner = document.querySelector(".winner-banner");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.className = "winner-banner";
-      document.body.prepend(banner);
-    }
-    banner.textContent = game.winner === myPlayerId ? "あなたの勝利!" : "相手の勝利...";
-  }
 }
 
 // ==========================================================
