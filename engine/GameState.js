@@ -229,12 +229,29 @@ export class GameState {
     for (const fn of pending) fn();
 
     // シールドのスナップショット計算(ターン終了時)
+    // 「痛いのは嫌なので」等のシールド増加効果で既に加算されている分を上書きしないよう、
+    // リセットではなく加算する
     const hpSum = player.board.reduce((sum, m) => sum + (m ? m.currentHp : 0), 0);
-    player.shield = Math.floor(hpSum / 2);
+    player.shield += Math.floor(hpSum / 2);
 
     this.log(`${this.activePlayerId} ターン終了。手札${player.hand.length}枚、シールド${player.shield}`);
 
     const nextId = this.opponentOf(this.activePlayerId);
+    const nextPlayer = this.players[nextId];
+
+    // マリガン(残す1枚を選ぶ)の判断材料として、次のプレイヤーのコスト上限・シールドは
+    // ターン開始(startTurn)を待たず、この時点で確定させておく。
+    // (以前は表示上のプレビューだけで、実際の値の更新はstartTurnまで遅れていたため、
+    //  マリガン中に見えるコスト・シールドが古い値のままになってしまっていた)
+    const nextOwnTurnCount = nextPlayer.ownTurnCount + 1;
+    const steps = Math.floor((nextOwnTurnCount - 1) / CONFIG.RESOURCE_STEP_EVERY_N_OWN_TURNS);
+    nextPlayer.resourceCap = Math.min(
+      CONFIG.RESOURCE_START + steps * CONFIG.RESOURCE_STEP,
+      CONFIG.RESOURCE_MAX
+    );
+    nextPlayer.resourceAvailable = nextPlayer.resourceCap;
+    nextPlayer.shield = 0;
+
     this.activePlayerId = null;
     this.phase = "between";
     this.pendingNextPlayerId = nextId;
@@ -552,7 +569,7 @@ export class GameState {
   }
 
   healPlayer(player, amount) {
-    player.hp += amount;
+    player.hp = Math.min(player.hp + amount, CONFIG.MAX_HP);
     this.log(`${player.id}: 体力が${amount}回復(現在${player.hp})`);
   }
 
