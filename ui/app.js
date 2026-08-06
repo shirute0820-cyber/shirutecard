@@ -179,7 +179,8 @@ function renderMonsterCard(playerId, instance, slot) {
   if (selectedAttacker === instance) el.classList.add("selected");
 
   el.innerHTML = `
-    <div class="name">${instance.defName}</div>
+    <div class="race-line">${instance.race ?? ""}</div>
+    <div class="name monster-name">${instance.defName}</div>
     <div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div>
     <div class="keywords">${kws.join(" ")}</div>
     ${cardEffectTooltipHtml(instance.defName)}
@@ -206,12 +207,9 @@ function renderMonsterCard(playerId, instance, slot) {
         render();
       };
       el.appendChild(btn);
-    } else if (!trStatus.usedUp) {
-      const label = document.createElement("div");
-      label.className = "tr-countdown";
-      label.textContent = `超越まであと${trStatus.turnsLeft}ターン`;
-      el.appendChild(label);
     }
+    // 超越がまだ使えない状態の残りターン数は、左列の常設「超越」ボックスに
+    // プレイヤー単位で表示済みのため、モンスターごとには表示しない
     el.onclick = () => {
       selectedAttacker = selectedAttacker === instance ? null : instance;
       render();
