@@ -376,6 +376,19 @@ export class GameState {
     return true;
   }
 
+  // UI表示用: このモンスターが超越を使えるまで、あと何ターンかを返す。
+  // 戻り値: { usedUp: true } … このモンスターは超越済みで二度と使えない
+  //         { available: true } … 今すぐ使える
+  //         { available: false, turnsLeft: N } … あとN(自分の)ターンで使える
+  transcendStatus(playerId, instance) {
+    if (instance.transcended) return { usedUp: true, available: false, turnsLeft: null };
+    const player = this.players[playerId];
+    const turnGate = Math.max(0, CONFIG.TRANSCEND_MIN_TURN - this.turnNumber);
+    const cooldownGate = Math.max(0, player.transcendCooldownUntilOwnTurn - player.ownTurnCount);
+    const turnsLeft = Math.max(turnGate, cooldownGate);
+    return { usedUp: false, available: turnsLeft === 0, turnsLeft };
+  }
+
   useTranscend(playerId, instance, params = {}) {
     if (!this.canTranscend(playerId, instance)) throw new Error("超越を使用できません");
     const player = this.players[playerId];
