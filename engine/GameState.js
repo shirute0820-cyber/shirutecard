@@ -21,13 +21,14 @@ function createPlayer(id, deckList) {
     hand: [],       // {uid, defName, hold}
     storage: [],     // defName[]
     graveyard: [],   // defName[]
+    exile: [],       // defName[] (「除外」ゾーン)
     board: new Array(CONFIG.BOARD_MONSTER_SLOTS).fill(null),
     hp: CONFIG.START_HP,
     shield: 0,
     ownTurnCount: 0,
     resourceCap: 0,
     resourceAvailable: 0,
-    transcendCooldownUntilGlobalTurn: 0,
+    transcendCooldownUntilOwnTurn: 0, // 自分の「自ターン数」基準でのクールダウン(グローバル/ラウンドとは無関係)
     secondPlayerBonusDrawsRemaining: 2, // 後攻補正②(合計2回、ただし1ターンに1回まで)
     secondPlayerBonusDrawUsedThisTurn: false,
   };
@@ -41,7 +42,10 @@ export class GameState {
     };
     this.firstPlayerId = firstPlayerId;
     this.secondPlayerId = firstPlayerId === "p1" ? "p2" : "p1";
-    this.globalTurn = 0; // 1から始まるグローバルターン数
+    // 「ターン数」は先攻・後攻共通のラウンド数。先攻の行動が始まるたびに+1され、
+    // 後攻の行動中は先攻と同じ値のまま(例:1ターン目=先攻の初手+後攻の初手、
+    // 後攻のターンが終わって先攻に戻るタイミングで2ターン目になる)。
+    this.turnNumber = 0;
     this.activePlayerId = null;
     this.phase = null;
     this.log = log;
@@ -133,10 +137,16 @@ export class GameState {
       }
     }
 
-    this.globalTurn += 1;
     this.activePlayerId = playerId;
     this.pendingNextPlayerId = null;
     player.ownTurnCount += 1;
+
+    // 「ターン数」は先攻の行動が始まったときだけ進む(先攻・後攻共通のラウンド数)。
+    // 例: 1ターン目=先攻の初手+後攻の初手。後攻のターンが終わって先攻に戻る
+    // タイミングで2ターン目になる。
+    if (playerId === this.firstPlayerId) {
+      this.turnNumber += 1;
+    }
 
     // リソース上限更新
     const steps = Math.floor((player.ownTurnCount - 1) / CONFIG.RESOURCE_STEP_EVERY_N_OWN_TURNS);
@@ -176,7 +186,7 @@ export class GameState {
 
     this.phase = "action";
     this.log(
-      `--- グローバルターン${this.globalTurn}: ${playerId}のターン(自ターン${player.ownTurnCount}) 開始 コスト上限${player.resourceCap} 手札${player.hand.length}枚 ---`
+      `--- ターン${this.turnNumber}: ${playerId}のターン(自ターン${player.ownTurnCount}) 開始 コスト上限${player.resourceCap} 手札${player.hand.length}枚 ---`
     );
   }
 
@@ -188,6 +198,16 @@ export class GameState {
     const nonHold = player.hand.filter((c) => !c.hold);
     if (nonHold.length === 0) return null;
     return nonHold;
+  }
+
+  // 「残す1枚」を選んでいる最中(=まだstartTurn()が呼ばれておらずコスト上限が
+  // 更新されていない)の段階でも、次のターンのコスト上限がいくつになるかを
+  // 状態を変えずに確認できるヘルパー。マリガンの判断材料として使う。
+  peekNextResourceCap(playerId) {
+    const player = this.players[playerId];
+    const nextOwnTurnCount = player.ownTurnCount + 1;
+    const steps = Math.floor((nextOwnTurnCount - 1) / CONFIG.RESOURCE_STEP_EVERY_N_OWN_TURNS);
+    return Math.min(CONFIG.RESOURCE_START + steps * CONFIG.RESOURCE_STEP, CONFIG.RESOURCE_MAX);
   }
 
   // 自分の手番を終える。次のプレイヤーのターンは開始しない
@@ -282,7 +302,7 @@ export class GameState {
     player.hand.splice(idx, 1);
 
     const instance = createCardInstance(defName, playerId, genUid());
-    instance.summonedOnTurn = this.globalTurn;
+    instance.summonedOnTurn = this.turnNumber;
     player.board[targetSlot] = instance;
 
     this.log(`${playerId}: 『${defName}』を召喚(${targetSlot}枠)`);
@@ -298,7 +318,7 @@ export class GameState {
     const player = this.players[playerId];
     if (player.board[boardSlot]) throw new Error("その盤面枠は空いていません");
     const instance = createCardInstance(defName, playerId, genUid());
-    instance.summonedOnTurn = this.globalTurn;
+    instance.summonedOnTurn = this.turnNumber;
     for (const k of grantedKeywords) instance.grantedKeywords.add(k);
     player.board[boardSlot] = instance;
     this.log(`${playerId}: 『${defName}』を特殊召喚(デッキ外生成, ${boardSlot}枠)`);
@@ -332,10 +352,10 @@ export class GameState {
   // ---------------- 超越 ----------------
 
   canTranscend(playerId, instance) {
-    if (this.globalTurn < CONFIG.TRANSCEND_MIN_TURN) return false;
+    if (this.turnNumber < CONFIG.TRANSCEND_MIN_TURN) return false;
     if (instance.transcended) return false;
     const player = this.players[playerId];
-    if (this.globalTurn < player.transcendCooldownUntilGlobalTurn) return false;
+    if (player.ownTurnCount < player.transcendCooldownUntilOwnTurn) return false;
     return true;
   }
 
@@ -343,18 +363,18 @@ export class GameState {
     if (!this.canTranscend(playerId, instance)) throw new Error("超越を使用できません");
     const player = this.players[playerId];
 
-    const bonus = Math.min(this.globalTurn * 2, CONFIG.TRANSCEND_MAX_BONUS);
+    const bonus = Math.min(this.turnNumber * 2, CONFIG.TRANSCEND_MAX_BONUS);
     instance.currentAtk += bonus;
     instance.currentHp += bonus;
     instance.transcended = true;
     instance.invulnerableThisTurn = true;
 
     // 召喚酔い中なら「突撃」状態を一時付与(モンスターへの攻撃のみ、そのターン限り)
-    if (instance.summonedOnTurn === this.globalTurn && !this.hasKeyword(instance, KEYWORDS.SOKKOU)) {
+    if (instance.summonedOnTurn === this.turnNumber && !this.hasKeyword(instance, KEYWORDS.SOKKOU)) {
       instance.attackRestrictionThisTurn = "monsterOnly";
     }
 
-    player.transcendCooldownUntilGlobalTurn = this.globalTurn + CONFIG.TRANSCEND_COOLDOWN;
+    player.transcendCooldownUntilOwnTurn = player.ownTurnCount + CONFIG.TRANSCEND_COOLDOWN;
 
     this.log(`${playerId}: 『${instance.defName}』が超越(+${bonus}/+${bonus})`);
 
@@ -371,7 +391,7 @@ export class GameState {
   canAttack(playerId, instance) {
     if (instance.cannotAttack) return false;
     if (instance.hasAttackedThisTurn) return false;
-    const sick = instance.summonedOnTurn === this.globalTurn;
+    const sick = instance.summonedOnTurn === this.turnNumber;
     if (!sick) return true;
     if (this.hasKeyword(instance, KEYWORDS.SOKKOU)) return true;
     if (this.hasKeyword(instance, KEYWORDS.TOTSUGEKI)) return true;
@@ -387,7 +407,7 @@ export class GameState {
     const opponent = this.players[opponentId];
 
     const restrictedToMonsterOnly =
-      (attackerInstance.summonedOnTurn === this.globalTurn &&
+      (attackerInstance.summonedOnTurn === this.turnNumber &&
         !this.hasKeyword(attackerInstance, KEYWORDS.SOKKOU) &&
         (this.hasKeyword(attackerInstance, KEYWORDS.TOTSUGEKI) ||
           attackerInstance.attackRestrictionThisTurn === "monsterOnly"));
