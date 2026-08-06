@@ -52,6 +52,30 @@ function serializeHandCard(c) {
   return { uid: c.uid, defName: c.defName, hold: !!c.hold };
 }
 
+// 盤面はスパース(歯抜け)なオブジェクトとして保存する。
+// [null, monster, null, null] のような「全部null」に近い配列をそのまま
+// Firebaseへ書き込むと、値がnullの項目は自動的に消え、最悪「board」という
+// 項目自体が丸ごと消えてしまう(=読み込み側でundefinedになりクラッシュする)。
+// そのため、存在するモンスターの枠番号だけをキーとして書き込み、
+// 復元時に4枠ぶんのnull配列へ展開し直す。
+function serializeBoard(board) {
+  const o = {};
+  board.forEach((m, i) => {
+    if (m) o[i] = serializeMonster(m);
+  });
+  return o;
+}
+
+function deserializeBoard(o) {
+  const board = [null, null, null, null];
+  if (o) {
+    for (const [i, m] of Object.entries(o)) {
+      board[Number(i)] = deserializeMonster(m);
+    }
+  }
+  return board;
+}
+
 function serializePlayer(p) {
   return {
     id: p.id,
@@ -59,7 +83,7 @@ function serializePlayer(p) {
     hand: p.hand.map(serializeHandCard),
     storage: [...p.storage],
     graveyard: [...p.graveyard],
-    board: p.board.map(serializeMonster),
+    board: serializeBoard(p.board),
     hp: p.hp,
     shield: p.shield,
     ownTurnCount: p.ownTurnCount,
@@ -71,11 +95,16 @@ function serializePlayer(p) {
   };
 }
 
+// Firebaseは値が空配列/null/undefinedのキーを書き込み時に取り除いてしまうため、
+// 復元側では欠けている可能性のある項目すべてに安全なデフォルト値を補う。
 function deserializePlayer(o) {
   return {
     ...o,
-    hand: o.hand.map((c) => ({ ...c })),
-    board: o.board.map(deserializeMonster),
+    deck: o.deck ?? [],
+    hand: (o.hand ?? []).map((c) => ({ ...c })),
+    storage: o.storage ?? [],
+    graveyard: o.graveyard ?? [],
+    board: deserializeBoard(o.board),
   };
 }
 
