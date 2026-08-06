@@ -53,6 +53,62 @@
     background: repeating-linear-gradient(45deg, #262b34, #262b34 6px, #2c323d 6px, #2c323d 12px);
     min-height: 64px;
   }
+
+  #deck-screen { display: none; max-width: 900px; margin: 30px auto; padding: 20px; }
+  #deck-screen h2 { font-size: 16px; }
+  #deck-summary {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+    z-index: 5;
+  }
+  #deck-summary .count { font-size: 20px; font-weight: 700; }
+  #deck-summary .count.ok { color: var(--good); }
+  #deck-summary .count.ng { color: var(--danger); }
+  #deck-summary button {
+    background: var(--accent);
+    border: none;
+    color: #1a1a1a;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #deck-summary button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #deck-card-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .deck-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    background: #262b34;
+    font-size: 12px;
+  }
+  .deck-card .name { font-weight: 600; margin-bottom: 2px; }
+  .deck-card .meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .deck-card .qty-row { display: flex; align-items: center; gap: 8px; justify-content: center; }
+  .deck-card .qty-row button {
+    background: var(--accent2);
+    border: none;
+    color: #1a1a1a;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  .deck-card .qty-row button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .deck-card.theme-赤 { border-color: #7a3b2e; }
+  .deck-errors { color: var(--danger); font-size: 12px; margin-top: 10px; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -62,7 +118,14 @@
     <textarea id="firebase-config-input" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "...", "projectId": "..." }'></textarea>
     <div class="row"><button id="btn-connect">接続</button></div>
 
-    <h2 style="margin-top:20px;">2. 部屋を作る/参加する</h2>
+    <h2 style="margin-top:20px;">2. デッキを準備する</h2>
+    <p style="font-size:12px;color:var(--muted);">40枚ちょうどのデッキを組んでください(このブラウザに保存され、次回以降は自動で読み込まれます)。</p>
+    <div class="row">
+      <button id="btn-open-deck-builder">デッキを編集する</button>
+      <span id="deck-status-label" style="font-size:12px;color:var(--muted);align-self:center;"></span>
+    </div>
+
+    <h2 style="margin-top:20px;">3. 部屋を作る/参加する</h2>
     <input type="text" id="room-code-input" placeholder="部屋コード(例: sample-room-1)" disabled />
     <div class="row">
       <button id="btn-create-room" disabled>部屋を作る(新規・先攻になります)</button>
@@ -73,6 +136,17 @@
       切断後に再び入る場合は、後攻なら「参加する」、先攻なら「先攻として再接続する」を使ってください(「部屋を作る」は新しい部屋を作るときだけ使用)。
     </p>
     <div id="setup-status"></div>
+  </div>
+
+  <div id="deck-screen">
+    <h2>デッキ構築(40枚ちょうど)</h2>
+    <div id="deck-summary">
+      <span class="count" id="deck-count">0/40</span>
+      <button id="btn-deck-save" disabled>保存してホームに戻る</button>
+      <button id="btn-deck-cancel">キャンセル</button>
+    </div>
+    <div id="deck-card-list"></div>
+    <div class="deck-errors" id="deck-errors"></div>
   </div>
 
   <div id="game-screen">
