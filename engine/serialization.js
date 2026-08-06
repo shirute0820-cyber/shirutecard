@@ -41,6 +41,8 @@ function deserializeMonster(o) {
   if (!o) return null;
   return {
     ...o,
+    race: o.race ?? null,
+    summonedOnTurn: o.summonedOnTurn ?? null,
     baseKeywords: new Set(o.baseKeywords ?? []),
     grantedKeywords: new Set(o.grantedKeywords ?? []),
     attackRestrictionThisTurn: o.attackRestrictionThisTurn ?? null,
@@ -108,9 +110,24 @@ function deserializePlayer(o) {
   };
 }
 
+// 安全装置: 個々のフィールドで対応を見落としても、Firebaseへの書き込み直前で
+// 必ずundefinedをnullに変換する(このバグ系統が二度と発生しないようにするための最終防衛ライン)。
+function sanitizeUndefined(value) {
+  if (value === undefined) return null;
+  if (Array.isArray(value)) return value.map(sanitizeUndefined);
+  if (value !== null && typeof value === "object") {
+    const o = {};
+    for (const [k, v] of Object.entries(value)) {
+      o[k] = sanitizeUndefined(v);
+    }
+    return o;
+  }
+  return value;
+}
+
 // 稼働中のGameStateを、Firebaseに書き込めるプレーンなJSONへ変換する
 export function serializeGame(game) {
-  return {
+  const raw = {
     players: {
       p1: serializePlayer(game.players.p1),
       p2: serializePlayer(game.players.p2),
@@ -134,6 +151,7 @@ export function serializeGame(game) {
     },
     updatedAt: Date.now(),
   };
+  return sanitizeUndefined(raw);
 }
 
 // スナップショットから、通常のGameStateメソッドがそのまま使える
@@ -145,9 +163,9 @@ export function hydrateGame(snapshot, { log = () => {} } = {}) {
   game.players.p2 = deserializePlayer(snapshot.players.p2);
   game.secondPlayerId = snapshot.secondPlayerId;
   game.globalTurn = snapshot.globalTurn;
-  game.activePlayerId = snapshot.activePlayerId;
+  game.activePlayerId = snapshot.activePlayerId ?? null;
   game.pendingNextPlayerId = snapshot.pendingNextPlayerId ?? null;
-  game.phase = snapshot.phase;
+  game.phase = snapshot.phase ?? null;
   game.winner = snapshot.winner ?? null;
   game.dragonKilledThisTurnByCombat = !!snapshot.dragonKilledThisTurnByCombat;
   game.gameStarted = !!snapshot.gameStarted;
