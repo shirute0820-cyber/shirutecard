@@ -26,6 +26,7 @@ export const CONFIG = Object.freeze({
   BOARD_MONSTER_SLOTS: 4,
   EVENT_ZONE_SLOTS: 1,
   START_HP: 80,
+  MAX_HP: 80, // 回復効果があっても体力はこの値を超えない
   HAND_DRAW_SIZE: 5,               // 自ターン開始時に常に引く枚数
   INITIAL_HAND_SIZE: 5,            // ゲーム開始時、マリガン前に両者へ配る枚数
   SECOND_PLAYER_FIRST_TURN_BONUS: 1, // 後攻1ターン目のみ追加で引く枚数(5+1=6枚)
