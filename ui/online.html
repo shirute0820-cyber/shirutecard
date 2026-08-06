@@ -65,9 +65,13 @@
     <h2 style="margin-top:20px;">2. 部屋を作る/参加する</h2>
     <input type="text" id="room-code-input" placeholder="部屋コード(例: sample-room-1)" disabled />
     <div class="row">
-      <button id="btn-create-room" disabled>部屋を作る(先攻になります)</button>
+      <button id="btn-create-room" disabled>部屋を作る(新規・先攻になります)</button>
       <button id="btn-join-room" disabled>参加する(後攻になります)</button>
+      <button id="btn-rejoin-host" disabled>先攻として再接続する</button>
     </div>
+    <p style="font-size:11px;color:var(--muted);margin-top:4px;">
+      切断後に再び入る場合は、後攻なら「参加する」、先攻なら「先攻として再接続する」を使ってください(「部屋を作る」は新しい部屋を作るときだけ使用)。
+    </p>
     <div id="setup-status"></div>
   </div>
 
@@ -106,6 +110,16 @@
       <h3>ログ</h3>
       <div id="log-content"></div>
     </aside>
+  </div>
+
+  <div id="zone-modal-overlay" style="display:none;">
+    <div id="zone-modal">
+      <div id="zone-modal-header">
+        <span id="zone-modal-title"></span>
+        <button id="zone-modal-close">閉じる</button>
+      </div>
+      <div id="zone-modal-content"></div>
+    </div>
   </div>
 
   <script type="module" src="online-app.js"></script>
