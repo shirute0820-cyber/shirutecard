@@ -58,13 +58,17 @@ function renderDeckList() {
     const row = document.createElement("div");
     row.className = "deck-row" + (isActive ? " active" : "");
     row.innerHTML = `
-      ${isActive ? '<span class="active-badge">対戦で使用中</span>' : ""}
-      <span class="deck-name">${d.name}</span>
-      <span class="deck-meta ${d.valid ? "" : "ng"}">${d.total}/${DECK_SIZE}枚${d.valid ? "" : "(未完成)"}</span>
-      <button data-action="select" ${isActive ? "disabled" : ""}>これを使う</button>
-      <button data-action="edit">編集(名前変更も可)</button>
-      <button data-action="delete" class="danger">削除</button>
-      <button data-action="delete-confirm" class="danger" style="display:none;">本当に削除</button>
+      <div class="deck-row-top">
+        ${isActive ? '<span class="active-badge">対戦で使用中</span>' : ""}
+        <span class="deck-name">${d.name}</span>
+      </div>
+      <div class="deck-row-bottom">
+        <span class="deck-meta ${d.valid ? "" : "ng"}">${d.total}/${DECK_SIZE}枚${d.valid ? "" : "(未完成)"}</span>
+        <button data-action="select" ${isActive ? "disabled" : ""}>これを使う</button>
+        <button data-action="edit">編集(名前変更も可)</button>
+        <button data-action="delete" class="danger">削除</button>
+        <button data-action="delete-confirm" class="danger" style="display:none;">本当に削除</button>
+      </div>
     `;
     row.querySelector('[data-action="select"]').onclick = () => {
       setActiveDeckId(d.id);
@@ -175,30 +179,59 @@ let myPlayerId = null; // "p1" | "p2"
 let game = null;
 let suppressNextPush = false; // 自分が書き込んだ直後のonValueで二重処理しないためのフラグ(実害はないが無駄な再描画を減らす)
 
+const FIREBASE_CONFIG_STORAGE_KEY = "cardgame-firebase-config";
+
+async function connectFirebase(configText) {
+  const status = document.getElementById("setup-status");
+  const firebaseConfig = JSON.parse(configText);
+
+  const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+  const { getDatabase, ref, set, onValue, get, update, runTransaction } = await import(
+    "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"
+  );
+
+  const app = initializeApp(firebaseConfig);
+  db = getDatabase(app);
+  dbRefFns = { ref, set, onValue, get, update, runTransaction };
+
+  // 次回以降は毎回貼り付けなくて済むよう、このブラウザに保存しておく
+  localStorage.setItem(FIREBASE_CONFIG_STORAGE_KEY, configText);
+
+  status.textContent = "接続しました。部屋を作るか参加してください。";
+  document.getElementById("room-code-input").disabled = false;
+  document.getElementById("btn-create-room").disabled = false;
+  document.getElementById("btn-join-room").disabled = false;
+  document.getElementById("btn-rejoin-host").disabled = false;
+}
+
 document.getElementById("btn-connect").onclick = async () => {
   const status = document.getElementById("setup-status");
   try {
-    const configText = document.getElementById("firebase-config-input").value;
-    const firebaseConfig = JSON.parse(configText);
-
-    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const { getDatabase, ref, set, onValue, get, update, runTransaction } = await import(
-      "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js"
-    );
-
-    const app = initializeApp(firebaseConfig);
-    db = getDatabase(app);
-    dbRefFns = { ref, set, onValue, get, update, runTransaction };
-
-    status.textContent = "接続しました。部屋を作るか参加してください。";
-    document.getElementById("room-code-input").disabled = false;
-    document.getElementById("btn-create-room").disabled = false;
-    document.getElementById("btn-join-room").disabled = false;
-    document.getElementById("btn-rejoin-host").disabled = false;
+    await connectFirebase(document.getElementById("firebase-config-input").value);
   } catch (err) {
     status.textContent = `接続エラー: ${err.message}\n(貼り付けたJSONの形式や、Realtime Databaseが有効になっているか確認してください)`;
   }
 };
+
+document.getElementById("btn-forget-firebase-config").onclick = () => {
+  localStorage.removeItem(FIREBASE_CONFIG_STORAGE_KEY);
+  document.getElementById("firebase-config-input").value = "";
+  document.getElementById("setup-status").textContent = "保存していたFirebase設定を削除しました。";
+};
+
+// 保存済みのFirebase設定があれば、貼り付け直す手間を省くため自動的に接続を試みる
+(async () => {
+  const saved = localStorage.getItem(FIREBASE_CONFIG_STORAGE_KEY);
+  if (!saved) return;
+  document.getElementById("firebase-config-input").value = saved;
+  const status = document.getElementById("setup-status");
+  status.textContent = "保存済みのFirebase設定で自動接続しています...";
+  try {
+    await connectFirebase(saved);
+  } catch (err) {
+    status.textContent = `自動接続エラー: ${err.message}\n(内容を確認して「接続」を押し直してください)`;
+  }
+})();
 
 document.getElementById("btn-create-room").onclick = async () => {
   const status = document.getElementById("setup-status");
@@ -549,7 +582,7 @@ function renderMonsterCard(ownerId, instance) {
     instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
   if (sick) el.classList.add("sick");
   if (selectedAttacker === instance) el.classList.add("selected");
-  el.innerHTML = `<div class="name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>${cardEffectTooltipHtml(instance.defName)}`;
+  el.innerHTML = `<div class="race-line">${instance.race ?? ""}</div><div class="name monster-name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>${cardEffectTooltipHtml(instance.defName)}`;
 
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
@@ -575,12 +608,9 @@ function renderMonsterCard(ownerId, instance) {
         render();
       };
       el.appendChild(btn);
-    } else if (!trStatus.usedUp) {
-      const label = document.createElement("div");
-      label.className = "tr-countdown";
-      label.textContent = `超越まであと${trStatus.turnsLeft}ターン`;
-      el.appendChild(label);
     }
+    // 超越がまだ使えない状態の残りターン数は、左列の常設「超越」ボックスに
+    // プレイヤー単位で表示済みのため、モンスターごとには表示しない
     el.onclick = () => {
       selectedAttacker = selectedAttacker === instance ? null : instance;
       render();
