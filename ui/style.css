@@ -144,3 +144,54 @@ main {
   padding: 8px;
   font-weight: 700;
 }
+
+.zone-link {
+  text-decoration: underline dotted;
+  cursor: pointer;
+  color: var(--accent2);
+}
+.zone-link:hover { color: var(--accent); }
+
+#zone-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+#zone-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(420px, 90vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+#zone-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+#zone-modal-header button {
+  background: var(--accent);
+  border: none;
+  color: #1a1a1a;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+#zone-modal-content {
+  padding: 10px 14px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+#zone-modal-content div {
+  padding: 3px 0;
+  border-bottom: 1px solid #22262e;
+}
