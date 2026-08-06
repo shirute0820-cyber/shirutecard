@@ -177,12 +177,12 @@
     <h2 style="margin-top:20px;">3. 部屋を作る/参加する</h2>
     <input type="text" id="room-code-input" placeholder="部屋コード(例: sample-room-1)" disabled />
     <div class="row">
-      <button id="btn-create-room" disabled>部屋を作る(新規・先攻になります)</button>
-      <button id="btn-join-room" disabled>参加する(後攻になります)</button>
-      <button id="btn-rejoin-host" disabled>先攻として再接続する</button>
+      <button id="btn-create-room" disabled>部屋を作る(新規)</button>
+      <button id="btn-join-room" disabled>参加する</button>
+      <button id="btn-rejoin-host" disabled>部屋を作った側として再接続する</button>
     </div>
     <p style="font-size:11px;color:var(--muted);margin-top:4px;">
-      切断後に再び入る場合は、後攻なら「参加する」、先攻なら「先攻として再接続する」を使ってください(「部屋を作る」は新しい部屋を作るときだけ使用)。
+      先攻・後攻は両者揃った時点でランダムに決まります。切断後に再び入る場合は、参加した側なら「参加する」、部屋を作った側なら「部屋を作った側として再接続する」を使ってください(「部屋を作る」は新しい部屋を作るときだけ使用)。
     </p>
     <div id="setup-status"></div>
   </div>
