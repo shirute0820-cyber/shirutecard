@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>カードゲーム デバッグ画面</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>カードゲーム デバッグ画面 <span class="sub">(1人で両プレイヤーを操作するローカル検証用)</span></h1>
+    <div id="turn-info"></div>
+  </header>
+
+  <main>
+    <section class="player-area" id="area-p2">
+      <h2>Player 2</h2>
+      <div class="stats" id="stats-p2"></div>
+      <div class="board" id="board-p2"></div>
+      <div class="hand" id="hand-p2"></div>
+    </section>
+
+    <section class="controls">
+      <button id="btn-mulligan-p1" style="display:none;">P1: マリガン確定</button>
+      <button id="btn-mulligan-p2" style="display:none;">P2: マリガン確定</button>
+      <button id="btn-end-turn">ターン終了</button>
+      <button id="btn-confirm-keep" style="display:none;">選択を確定(未選択なら「何も残さない」)</button>
+      <button id="btn-attack-face" disabled>選択中のモンスターでプレイヤーへ直接攻撃</button>
+      <button id="btn-cancel-select">選択解除</button>
+      <div id="selection-info"></div>
+    </section>
+
+    <section class="player-area" id="area-p1">
+      <h2>Player 1</h2>
+      <div class="stats" id="stats-p1"></div>
+      <div class="board" id="board-p1"></div>
+      <div class="hand" id="hand-p1"></div>
+    </section>
+  </main>
+
+  <aside id="log-panel">
+    <h3>ログ</h3>
+    <div id="log-content"></div>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
