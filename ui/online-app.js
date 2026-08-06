@@ -246,11 +246,11 @@ document.getElementById("btn-create-room").onclick = async () => {
 
   try {
     // 既に同じ部屋コードが存在する場合、誤って上書き(ゲームリセット)しないようにする。
-    // 再接続したい場合は「参加する」/「先攻として再接続する」を使う。
+    // 再接続したい場合は「参加する」/「部屋を作った側として再接続する」を使う。
     const existingSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/meta`));
     if (existingSnap.exists()) {
       status.textContent =
-        "この部屋コードは既に使われています。再接続したい場合は「参加する」または「先攻として再接続する」を使ってください。";
+        "この部屋コードは既に使われています。再接続したい場合は「参加する」または「部屋を作った側として再接続する」を使ってください。";
       return;
     }
   } catch (err) {
@@ -349,10 +349,13 @@ function subscribeToMetaForInit() {
       const stateRef = dbRefFns.ref(db, `rooms/${roomCode}/state`);
       await dbRefFns.runTransaction(stateRef, (currentData) => {
         if (currentData !== null) return currentData; // 既に初期化済みなら何もしない
+        // 先攻・後攻をランダムに抽選する(p1=部屋を作った人、p2=参加した人、
+        // という役割はここでは変えず、「どちらが先攻か」だけを50%で決める)
+        const firstPlayerId = Math.random() < 0.5 ? "p1" : "p2";
         const initGame = new GameState({
           player1Deck: meta.hostDeck,
           player2Deck: meta.guestDeck,
-          firstPlayerId: "p1",
+          firstPlayerId,
           log: () => {},
         });
         initGame.startGame();
@@ -414,7 +417,7 @@ async function pushState() {
 function enterGameScreen() {
   document.getElementById("setup-screen").style.display = "none";
   document.getElementById("game-screen").style.display = "block";
-  document.getElementById("my-role-label").textContent = `(あなたは${myPlayerId === "p1" ? "先攻" : "後攻"})`;
+  document.getElementById("my-role-label").textContent = "(先攻・後攻は抽選中...)";
   document.getElementById("me-label").textContent = `自分(${myPlayerId})`;
   document.getElementById("opponent-label").textContent = `相手(${opponentId()})`;
   render();
@@ -870,6 +873,10 @@ function render() {
     document.getElementById("turn-info").textContent = "相手の準備を待っています...";
     return;
   }
+
+  // 先攻・後攻の抽選結果が確定したら、役割表示を更新する
+  document.getElementById("my-role-label").textContent =
+    `(あなたは${myPlayerId === game.firstPlayerId ? "先攻" : "後攻"})`;
 
   if (!game.gameStarted) {
     document.getElementById("turn-info").textContent = "マリガンフェーズ";
