@@ -157,6 +157,19 @@ function keywordSet(instance) {
   return new Set([...instance.baseKeywords, ...instance.grantedKeywords]);
 }
 
+// カード効果のホバーツールチップ・コスト強調表示用のヘルパー
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function cardEffectTooltipHtml(defName) {
+  const def = CARD_DEFS[defName];
+  if (!def?.effect) return "";
+  return `<div class="card-effect-tooltip">${escapeHtml(def.effect)}</div>`;
+}
+function costHtml(cost) {
+  return `<span class="cost-num">${cost ?? "?"}</span>`;
+}
+
 function renderMonsterCard(playerId, instance, slot) {
   const el = document.createElement("div");
   el.className = "card";
@@ -169,6 +182,7 @@ function renderMonsterCard(playerId, instance, slot) {
     <div class="name">${instance.defName}</div>
     <div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div>
     <div class="keywords">${kws.join(" ")}</div>
+    ${cardEffectTooltipHtml(instance.defName)}
   `;
 
   if (playerId === game.activePlayerId && !game.winner) {
@@ -281,7 +295,7 @@ function renderHand(playerId) {
       el.className = "card";
       const marked = mulliganReturn[playerId].has(c.uid);
       if (marked) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>`;
+      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${cardEffectTooltipHtml(c.defName)}`;
       if (!done) {
         el.onclick = () => {
           if (marked) mulliganReturn[playerId].delete(c.uid);
@@ -304,7 +318,7 @@ function renderHand(playerId) {
       el.className = "card";
       const chosen = keepSelection.chosenUid === c.uid;
       if (chosen) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>`;
+      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${cardEffectTooltipHtml(c.defName)}`;
       el.onclick = () => {
         keepSelection.chosenUid = chosen ? null : c.uid;
         render();
@@ -328,8 +342,9 @@ function renderHand(playerId) {
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
     el.innerHTML = `
       <div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div>
-      <div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>
+      <div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>
       ${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}
+      ${cardEffectTooltipHtml(c.defName)}
     `;
     if (playerId === game.activePlayerId && !game.winner) {
       el.onclick = async () => {
