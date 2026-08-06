@@ -1,0 +1,463 @@
+import { GameState } from "../engine/GameState.js";
+import { KEYWORDS, CONFIG } from "../engine/constants.js";
+import { CARD_DEFS } from "../engine/cardDefinitions.js";
+
+// ==========================================================
+// ログ
+// ==========================================================
+const logEl = document.getElementById("log-content");
+function pushLog(msg) {
+  const line = document.createElement("div");
+  line.textContent = msg;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ==========================================================
+// テスト用デッキ(スプレッドシートの全カードを最低1枚ずつ、
+// コピー可能なものは3枚まで積んだ簡易デッキ)
+// ==========================================================
+function buildSampleDeck() {
+  const list = [];
+  for (const [name, def] of Object.entries(CARD_DEFS)) {
+    const copies = def.copyLimit ?? CONFIG.DEFAULT_COPY_LIMIT;
+    for (let i = 0; i < Math.min(copies, 2); i++) list.push(name);
+  }
+  return list;
+}
+
+const game = new GameState({
+  player1Deck: buildSampleDeck(),
+  player2Deck: buildSampleDeck(),
+  firstPlayerId: "p1",
+  log: pushLog,
+});
+game.startGame();
+
+// ==========================================================
+// UI状態
+// ==========================================================
+let selectedHandCard = null; // { playerId, uid, defName, type }
+let selectedAttacker = null; // instance
+let keepSelection = null; // 次ターン開始時「残す1枚」選択中: { playerId, nonHold: [...], chosenUid: null } | null
+let mulliganReturn = { p1: new Set(), p2: new Set() }; // ゲーム開始時マリガンで「デッキに戻す」に選んだ手札uid
+
+// カード効果に渡すパラメータを、必要な場合だけ画面上の簡易プロンプトで組み立てる。
+// 未対応のカードは「対象未指定」としてデフォルト挙動(効果側のフォールバック)に任せる。
+function pickMonster(candidates, label) {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const listText = candidates
+    .map((m, i) => `${i}: ${m.defName} (${m.currentAtk}/${m.currentHp})`)
+    .join("\n");
+  const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
+  const idx = Number(input);
+  return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
+}
+
+function pickHandCard(candidates, label) {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+  const listText = candidates.map((c, i) => `${i}: ${c.defName}`).join("\n");
+  const input = window.prompt(`${label}\n${listText}\n番号を入力してください`, "0");
+  const idx = Number(input);
+  return Number.isInteger(idx) && candidates[idx] ? candidates[idx] : candidates[0];
+}
+
+const PARAM_BUILDERS = {
+  投石: ({ opponent }) => ({ targetMonster: pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター") }),
+  ドラゴンの眼光: ({ opponent }) => ({
+    targetMonster: pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター"),
+  }),
+  用意周到: ({ player }) => ({
+    targetHandUid: pickHandCard(player.hand, "保留を付与する手札")?.uid,
+  }),
+  ドラゴンの血誓: ({ player }) => ({
+    discardHandUid: pickHandCard(
+      player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"),
+      "墓地へ送るドラゴン種の手札"
+    )?.uid,
+  }),
+  滝の試練: ({ player }) => ({
+    discardHandUid: pickHandCard(player.hand, "捨てる手札")?.uid,
+  }),
+  リバーススケイル: ({ player }) => ({
+    targetMonster: pickMonster(
+      player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")),
+      "攻撃力を上げる自分のモンスター"
+    ),
+  }),
+};
+
+// ==========================================================
+// レンダリング
+// ==========================================================
+function keywordSet(instance) {
+  return new Set([...instance.baseKeywords, ...instance.grantedKeywords]);
+}
+
+function renderMonsterCard(playerId, instance, slot) {
+  const el = document.createElement("div");
+  el.className = "card";
+  const kws = [...keywordSet(instance)];
+  const sick = instance.summonedOnTurn === game.globalTurn && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
+  if (sick) el.classList.add("sick");
+  if (selectedAttacker === instance) el.classList.add("selected");
+
+  el.innerHTML = `
+    <div class="name">${instance.defName}</div>
+    <div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div>
+    <div class="keywords">${kws.join(" ")}</div>
+  `;
+
+  if (playerId === game.activePlayerId) {
+    if (game.canTranscend(playerId, instance)) {
+      const btn = document.createElement("button");
+      btn.className = "tr-btn";
+      btn.textContent = "超越";
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        try {
+          game.useTranscend(playerId, instance, {});
+        } catch (err) {
+          alert(err.message);
+        }
+        render();
+      };
+      el.appendChild(btn);
+    }
+    el.onclick = () => {
+      selectedAttacker = selectedAttacker === instance ? null : instance;
+      render();
+    };
+  } else {
+    // 相手モンスター: 攻撃対象として選択中なら攻撃実行
+    el.onclick = () => {
+      if (!selectedAttacker) return;
+      try {
+        game.attack(game.activePlayerId, selectedAttacker, { type: "monster", instance });
+      } catch (err) {
+        alert(err.message);
+      }
+      selectedAttacker = null;
+      render();
+    };
+  }
+  return el;
+}
+
+function renderEmptySlot() {
+  const el = document.createElement("div");
+  el.className = "card empty-slot";
+  el.textContent = "空き";
+  return el;
+}
+
+function renderBoard(playerId) {
+  const container = document.getElementById(`board-${playerId}`);
+  container.innerHTML = "";
+  const player = game.players[playerId];
+  player.board.forEach((m, slot) => {
+    if (m) {
+      container.appendChild(renderMonsterCard(playerId, m, slot));
+    } else {
+      const el = renderEmptySlot();
+      if (playerId === game.activePlayerId && selectedHandCard && selectedHandCard.type === "モンスター") {
+        el.classList.remove("empty-slot");
+        el.textContent = "ここに召喚";
+        el.onclick = () => {
+          const opponent = game.players[game.opponentOf(playerId)];
+          const builder = PARAM_BUILDERS[selectedHandCard.defName];
+          const params = builder ? builder({ player, opponent }) : {};
+          try {
+            game.summonFromHand(playerId, selectedHandCard.uid, slot, params);
+          } catch (err) {
+            alert(err.message);
+          }
+          selectedHandCard = null;
+          render();
+        };
+      }
+      container.appendChild(el);
+    }
+  });
+
+  // イベントゾーン(現状の実装ではイベントは即座に解決されるため常に空。
+  // ルール上の見た目を合わせるための表示専用の5枠目)
+  const eventZone = document.createElement("div");
+  eventZone.className = "card empty-slot event-zone";
+  eventZone.textContent = "イベントゾーン";
+  container.appendChild(eventZone);
+}
+
+function renderHand(playerId) {
+  const container = document.getElementById(`hand-${playerId}`);
+  container.innerHTML = "";
+  const player = game.players[playerId];
+
+  // ゲーム開始時のマリガン画面
+  if (!game.gameStarted) {
+    const done = game.mulliganDone[playerId];
+    for (const c of player.hand) {
+      const def = CARD_DEFS[c.defName];
+      const el = document.createElement("div");
+      el.className = "card";
+      const marked = mulliganReturn[playerId].has(c.uid);
+      if (marked) el.classList.add("selected");
+      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>`;
+      if (!done) {
+        el.onclick = () => {
+          if (marked) mulliganReturn[playerId].delete(c.uid);
+          else mulliganReturn[playerId].add(c.uid);
+          render();
+        };
+      } else {
+        el.style.opacity = "0.5";
+      }
+      container.appendChild(el);
+    }
+    return;
+  }
+
+  // 次のプレイヤーのターン開始時「残す1枚」選択モード中は、専用の選択UIに切り替える
+  if (keepSelection && playerId === keepSelection.playerId) {
+    for (const c of keepSelection.nonHold) {
+      const def = CARD_DEFS[c.defName];
+      const el = document.createElement("div");
+      el.className = "card";
+      const chosen = keepSelection.chosenUid === c.uid;
+      if (chosen) el.classList.add("selected");
+      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>`;
+      el.onclick = () => {
+        keepSelection.chosenUid = chosen ? null : c.uid;
+        render();
+      };
+      container.appendChild(el);
+    }
+    for (const c of player.hand.filter((h) => h.hold)) {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.style.opacity = "0.6";
+      el.innerHTML = `<div class="name">${c.defName} (保留・自動で残る)</div>`;
+      container.appendChild(el);
+    }
+    return;
+  }
+
+  for (const c of player.hand) {
+    const def = CARD_DEFS[c.defName];
+    const el = document.createElement("div");
+    el.className = "card" + (def?.type === "イベント" ? " event" : "");
+    if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
+    el.innerHTML = `
+      <div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div>
+      <div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>
+      ${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}
+    `;
+    if (playerId === game.activePlayerId) {
+      el.onclick = () => {
+        if (def?.type === "イベント") {
+          const opponent = game.players[game.opponentOf(playerId)];
+          const builder = PARAM_BUILDERS[c.defName];
+          const params = builder ? builder({ player, opponent }) : {};
+          try {
+            game.playEvent(playerId, c.uid, params);
+          } catch (err) {
+            alert(err.message);
+          }
+          render();
+          return;
+        }
+        if (def?.releaseRequirement) {
+          // リリース召喚カードは、リリース対象がいた枠にそのまま出るため
+          // 空き枠を選ばせず、クリックした時点で即座に召喚を試みる
+          const opponent = game.players[game.opponentOf(playerId)];
+          const builder = PARAM_BUILDERS[c.defName];
+          const params = builder ? builder({ player, opponent }) : {};
+          try {
+            game.summonFromHand(playerId, c.uid, null, params);
+          } catch (err) {
+            alert(err.message);
+          }
+          render();
+          return;
+        }
+        selectedHandCard = selectedHandCard?.uid === c.uid ? null : { playerId, uid: c.uid, defName: c.defName, type: def?.type };
+        render();
+      };
+    }
+    container.appendChild(el);
+  }
+}
+
+function renderStats(playerId) {
+  const player = game.players[playerId];
+  const el = document.getElementById(`stats-${playerId}`);
+  el.innerHTML = `
+    HP: <b>${player.hp}</b> ／
+    シールド: <b>${player.shield}</b> ／
+    コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b> ／
+    デッキ: ${player.deck.length} ／ ストレージ: ${player.storage.length} ／ 墓地: ${player.graveyard.length}
+    ${
+      player.id === game.secondPlayerId
+        ? `<button id="bonus-draw-btn" ${
+            player.secondPlayerBonusDrawsRemaining <= 0 || player.secondPlayerBonusDrawUsedThisTurn ? "disabled" : ""
+          }>後攻追加ドローを使う(残り${player.secondPlayerBonusDrawsRemaining}回${
+            player.secondPlayerBonusDrawUsedThisTurn ? "・このターンは使用済み" : ""
+          })</button>`
+        : ""
+    }
+  `;
+  const bonusBtn = document.getElementById("bonus-draw-btn");
+  if (bonusBtn) {
+    bonusBtn.onclick = () => {
+      try {
+        game.useSecondPlayerBonusDraw(playerId);
+      } catch (err) {
+        alert(err.message);
+      }
+      render();
+    };
+  }
+}
+
+function render() {
+  if (!game.gameStarted) {
+    document.getElementById("turn-info").textContent = "マリガンフェーズ(両者とも準備ができたら確定してください)";
+    renderStats("p1");
+    renderStats("p2");
+    document.getElementById("board-p1").innerHTML = "";
+    document.getElementById("board-p2").innerHTML = "";
+    renderHand("p1");
+    renderHand("p2");
+
+    document.getElementById("btn-end-turn").style.display = "none";
+    document.getElementById("btn-confirm-keep").style.display = "none";
+    document.getElementById("btn-attack-face").style.display = "none";
+    document.getElementById("btn-cancel-select").style.display = "none";
+
+    const btnM1 = document.getElementById("btn-mulligan-p1");
+    const btnM2 = document.getElementById("btn-mulligan-p2");
+    btnM1.style.display = "";
+    btnM2.style.display = "";
+    btnM1.disabled = game.mulliganDone.p1;
+    btnM2.disabled = game.mulliganDone.p2;
+    btnM1.textContent = game.mulliganDone.p1 ? "P1: マリガン済み" : `P1: マリガン確定(戻す${mulliganReturn.p1.size}枚)`;
+    btnM2.textContent = game.mulliganDone.p2 ? "P2: マリガン済み" : `P2: マリガン確定(戻す${mulliganReturn.p2.size}枚)`;
+    document.getElementById("selection-info").textContent =
+      "戻したいカードをクリックして選び、準備ができたら各プレイヤーの確定ボタンを押してください(0枚のままでもOK)";
+    return;
+  }
+
+  document.getElementById("btn-mulligan-p1").style.display = "none";
+  document.getElementById("btn-mulligan-p2").style.display = "none";
+  document.getElementById("btn-attack-face").style.display = "";
+  document.getElementById("btn-cancel-select").style.display = "";
+
+  document.getElementById("turn-info").textContent =
+    `グローバルターン${game.globalTurn} / ${game.activePlayerId}のターン(フェイズ:${game.phase})`;
+
+  renderStats("p1");
+  renderStats("p2");
+  renderBoard("p1");
+  renderBoard("p2");
+  renderHand("p1");
+  renderHand("p2");
+
+  document.getElementById("btn-attack-face").disabled = !selectedAttacker;
+  document.getElementById("btn-end-turn").style.display = keepSelection ? "none" : "";
+  document.getElementById("btn-confirm-keep").style.display = keepSelection ? "" : "none";
+  document.getElementById("selection-info").textContent = keepSelection
+    ? `${keepSelection.playerId}の次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(クリックで選択/解除、未選択のまま確定すると「何も残さない」)`
+    : selectedAttacker
+    ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、またはプレイヤーへ直接攻撃ボタン)`
+    : selectedHandCard
+    ? `選択中の手札: ${selectedHandCard.defName}(空き枠をクリックして召喚)`
+    : "";
+
+  if (game.winner) {
+    let banner = document.querySelector(".winner-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "winner-banner";
+      document.body.prepend(banner);
+    }
+    banner.textContent = `${game.winner} の勝利!`;
+  }
+}
+
+document.getElementById("btn-end-turn").onclick = () => {
+  if (keepSelection) return; // 選択モード中はこのボタンでは何もしない(専用の確定ボタンを使う)
+  selectedAttacker = null;
+  selectedHandCard = null;
+
+  const nextId = game.opponentOf(game.activePlayerId);
+  try {
+    game.endTurn();
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  const needed = game.peekKeepSelection(nextId);
+  if (needed) {
+    keepSelection = { playerId: nextId, nonHold: needed, chosenUid: null };
+    render();
+    return;
+  }
+  game.startTurn(nextId);
+  render();
+};
+
+document.getElementById("btn-confirm-keep").onclick = () => {
+  if (!keepSelection) return;
+  // chosenUidがnullのままなら「何も残さない」という明示的な選択として扱う
+  try {
+    game.startTurn(keepSelection.playerId, keepSelection.chosenUid);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  keepSelection = null;
+  render();
+};
+
+document.getElementById("btn-attack-face").onclick = () => {
+  if (!selectedAttacker) return;
+  try {
+    game.attack(game.activePlayerId, selectedAttacker, { type: "player" });
+  } catch (err) {
+    alert(err.message);
+  }
+  selectedAttacker = null;
+  render();
+};
+
+document.getElementById("btn-cancel-select").onclick = () => {
+  selectedAttacker = null;
+  selectedHandCard = null;
+  render();
+};
+
+document.getElementById("btn-mulligan-p1").onclick = () => {
+  try {
+    game.mulligan("p1", [...mulliganReturn.p1]);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  mulliganReturn.p1 = new Set();
+  render();
+};
+
+document.getElementById("btn-mulligan-p2").onclick = () => {
+  try {
+    game.mulligan("p2", [...mulliganReturn.p2]);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  mulliganReturn.p2 = new Set();
+  render();
+};
+
+render();
