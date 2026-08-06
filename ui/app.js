@@ -375,6 +375,7 @@ function closeZoneModal() {
 function renderStats(playerId) {
   const player = game.players[playerId];
   const el = document.getElementById(`stats-${playerId}`);
+
   el.innerHTML = `
     HP: <b>${player.hp}</b> ／
     シールド: <b>${player.shield}</b> ／
@@ -456,7 +457,7 @@ function render() {
   document.getElementById("btn-end-turn").style.display = keepSelection ? "none" : "";
   document.getElementById("btn-confirm-keep").style.display = keepSelection ? "" : "none";
   document.getElementById("selection-info").textContent = keepSelection
-    ? `${keepSelection.playerId}の次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(クリックで選択/解除、未選択のまま確定すると「何も残さない」) / 次ターンのコスト上限:${game.peekNextResourceCap(keepSelection.playerId)}`
+    ? `${keepSelection.playerId}の次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(クリックで選択/解除、未選択のまま確定すると「何も残さない」)`
     : selectedAttacker
     ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、またはプレイヤーへ直接攻撃ボタン)`
     : selectedHandCard
