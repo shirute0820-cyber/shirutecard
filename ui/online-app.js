@@ -121,12 +121,13 @@ function renderDeckBuilder() {
     el.className = `deck-card theme-${def.theme ?? ""}`;
     el.innerHTML = `
       <div class="name">${def.name}</div>
-      <div class="meta">コスト${def.cost ?? "?"} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
+      <div class="meta">コスト${costHtml(def.cost)} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
       <div class="qty-row">
         <button data-action="minus">-</button>
         <span>${n} / ${limit}</span>
         <button data-action="plus">+</button>
       </div>
+      ${cardEffectTooltipHtml(def.name)}
     `;
     el.querySelector('[data-action="minus"]').onclick = () => {
       if (n > 0) deckBuilderDraft[def.name] = n - 1;
@@ -524,6 +525,19 @@ function keywordSet(instance) {
   return new Set([...instance.baseKeywords, ...instance.grantedKeywords]);
 }
 
+// カード効果のホバーツールチップ・コスト強調表示用のヘルパー
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function cardEffectTooltipHtml(defName) {
+  const def = CARD_DEFS[defName];
+  if (!def?.effect) return "";
+  return `<div class="card-effect-tooltip">${escapeHtml(def.effect)}</div>`;
+}
+function costHtml(cost) {
+  return `<span class="cost-num">${cost ?? "?"}</span>`;
+}
+
 // ==========================================================
 // レンダリング(自分視点/相手視点)
 // ==========================================================
@@ -535,7 +549,7 @@ function renderMonsterCard(ownerId, instance) {
     instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
   if (sick) el.classList.add("sick");
   if (selectedAttacker === instance) el.classList.add("selected");
-  el.innerHTML = `<div class="name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>`;
+  el.innerHTML = `<div class="name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>${cardEffectTooltipHtml(instance.defName)}`;
 
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
@@ -664,7 +678,7 @@ function renderHand(role) {
       el.className = "card";
       const marked = mulliganReturn.has(c.uid);
       if (marked) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${def?.cost ?? "?"}</div>`;
+      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
       if (!done) {
         el.onclick = () => {
           if (marked) mulliganReturn.delete(c.uid);
@@ -687,7 +701,7 @@ function renderHand(role) {
       el.className = "card";
       const chosen = keepSelection.chosenUid === c.uid;
       if (chosen) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${def?.cost ?? "?"}</div>`;
+      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
       el.onclick = () => {
         keepSelection.chosenUid = chosen ? null : c.uid;
         render();
@@ -709,7 +723,7 @@ function renderHand(role) {
     const el = document.createElement("div");
     el.className = "card" + (def?.type === "イベント" ? " event" : "");
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
-    el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}`;
+    el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
 
     if (isMyAction) {
       el.onclick = async () => {
