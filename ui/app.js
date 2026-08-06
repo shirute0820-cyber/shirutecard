@@ -272,13 +272,6 @@ function renderBoard(playerId) {
       container.appendChild(el);
     }
   });
-
-  // イベントゾーン(現状の実装ではイベントは即座に解決されるため常に空。
-  // ルール上の見た目を合わせるための表示専用の5枠目)
-  const eventZone = document.createElement("div");
-  eventZone.className = "card empty-slot event-zone";
-  eventZone.textContent = "イベントゾーン";
-  container.appendChild(eventZone);
 }
 
 function renderHand(playerId) {
@@ -413,16 +406,12 @@ function closeZoneModal() {
 
 function renderStats(playerId) {
   const player = game.players[playerId];
-  const el = document.getElementById(`stats-${playerId}`);
 
+  // 常設のミニステータス(HP・コスト・後攻追加ドロー)
+  const el = document.getElementById(`stats-${playerId}`);
   el.innerHTML = `
     HP: <b>${player.hp}</b> ／
-    シールド: <b>${player.shield}</b> ／
-    コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b> ／
-    デッキ: <span class="zone-link" data-zone="deck" data-owner="${playerId}">${player.deck.length}</span> ／
-    ストレージ: <span class="zone-link" data-zone="storage" data-owner="${playerId}">${player.storage.length}</span> ／
-    墓地: <span class="zone-link" data-zone="graveyard" data-owner="${playerId}">${player.graveyard.length}</span> ／
-    除外: <span class="zone-link" data-zone="exile" data-owner="${playerId}">${(player.exile ?? []).length}</span>
+    コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b>
     ${
       player.id === game.secondPlayerId
         ? `<button id="bonus-draw-btn" ${
@@ -433,9 +422,6 @@ function renderStats(playerId) {
         : ""
     }
   `;
-  for (const link of el.querySelectorAll(".zone-link")) {
-    link.onclick = () => openZoneModal(link.dataset.owner, link.dataset.zone);
-  }
   const bonusBtn = document.getElementById("bonus-draw-btn");
   if (bonusBtn) {
     bonusBtn.onclick = () => {
@@ -447,6 +433,25 @@ function renderStats(playerId) {
       render();
     };
   }
+
+  // 盤面まわりの常設ゾーン(シールド・超越・ストレージ・除外・墓地・デッキ)
+  document.getElementById(`shield-value-${playerId}`).textContent = player.shield;
+
+  const trStatus = game.playerTranscendAvailability(playerId);
+  const trBox = document.getElementById(`transcend-box-${playerId}`);
+  const trValue = document.getElementById(`transcend-value-${playerId}`);
+  trBox.classList.toggle("available", trStatus.available);
+  trValue.textContent = trStatus.available ? "使用可能" : `あと${trStatus.turnsLeft}ターン`;
+
+  document.getElementById(`storage-count-${playerId}`).textContent = player.storage.length;
+  document.getElementById(`exile-count-${playerId}`).textContent = (player.exile ?? []).length;
+  document.getElementById(`graveyard-count-${playerId}`).textContent = player.graveyard.length;
+  document.getElementById(`deck-count-${playerId}`).textContent = player.deck.length;
+
+  document.getElementById(`storage-zone-${playerId}`).onclick = () => openZoneModal(playerId, "storage");
+  document.getElementById(`exile-zone-${playerId}`).onclick = () => openZoneModal(playerId, "exile");
+  document.getElementById(`graveyard-zone-${playerId}`).onclick = () => openZoneModal(playerId, "graveyard");
+  document.getElementById(`deck-zone-${playerId}`).onclick = () => openZoneModal(playerId, "deck");
 }
 
 function render() {
