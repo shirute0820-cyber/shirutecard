@@ -125,6 +125,7 @@
     padding: 8px;
     background: #262b34;
     font-size: 12px;
+    position: relative; /* ツールチップの基準位置にする */
   }
   .deck-card .name { font-weight: 600; margin-bottom: 2px; }
   .deck-card .meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
@@ -141,6 +142,8 @@
   }
   .deck-card .qty-row button:disabled { opacity: 0.3; cursor: not-allowed; }
   .deck-card.theme-赤 { border-color: #7a3b2e; }
+  .deck-card .cost-num { color: var(--accent); font-weight: 800; font-size: 1.25em; }
+  .deck-card:hover .card-effect-tooltip { opacity: 1; }
   .deck-errors { color: var(--danger); font-size: 12px; margin-top: 10px; white-space: pre-wrap; }
 </style>
 </head>
