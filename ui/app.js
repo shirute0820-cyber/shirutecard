@@ -85,21 +85,21 @@ const PARAM_BUILDERS = {
     if (t === CANCELLED) return null;
     return { targetMonster: t };
   },
-  用意周到: ({ player }) => {
-    const c = pickHandCard(player.hand, "保留を付与する手札");
+  用意周到: ({ player, selfUid }) => {
+    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "保留を付与する手札");
     if (c === CANCELLED) return null;
     return { targetHandUid: c?.uid };
   },
-  ドラゴンの血誓: ({ player }) => {
+  ドラゴンの血誓: ({ player, selfUid }) => {
     const c = pickHandCard(
-      player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"),
+      player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"),
       "墓地へ送るドラゴン種の手札"
     );
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
-  滝の試練: ({ player }) => {
-    const c = pickHandCard(player.hand, "捨てる手札");
+  滝の試練: ({ player, selfUid }) => {
+    const c = pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
   },
@@ -153,11 +153,12 @@ function renderMonsterCard(playerId, instance, slot) {
     <div class="keywords">${kws.join(" ")}</div>
   `;
 
-  if (playerId === game.activePlayerId) {
-    if (game.canTranscend(playerId, instance)) {
+  if (playerId === game.activePlayerId && !game.winner) {
+    const trStatus = game.transcendStatus(playerId, instance);
+    if (trStatus.available) {
       const btn = document.createElement("button");
       btn.className = "tr-btn";
-      btn.textContent = "超越";
+      btn.textContent = "超越(使用可能)";
       btn.onclick = (e) => {
         e.stopPropagation();
         const player = game.players[playerId];
@@ -173,12 +174,17 @@ function renderMonsterCard(playerId, instance, slot) {
         render();
       };
       el.appendChild(btn);
+    } else if (!trStatus.usedUp) {
+      const label = document.createElement("div");
+      label.className = "tr-countdown";
+      label.textContent = `超越まであと${trStatus.turnsLeft}ターン`;
+      el.appendChild(label);
     }
     el.onclick = () => {
       selectedAttacker = selectedAttacker === instance ? null : instance;
       render();
     };
-  } else {
+  } else if (!game.winner) {
     // 相手モンスター: 攻撃対象として選択中なら攻撃実行
     el.onclick = () => {
       if (!selectedAttacker) return;
@@ -210,13 +216,13 @@ function renderBoard(playerId) {
       container.appendChild(renderMonsterCard(playerId, m, slot));
     } else {
       const el = renderEmptySlot();
-      if (playerId === game.activePlayerId && selectedHandCard && selectedHandCard.type === "モンスター") {
+      if (playerId === game.activePlayerId && !game.winner && selectedHandCard && selectedHandCard.type === "モンスター") {
         el.classList.remove("empty-slot");
         el.textContent = "ここに召喚";
         el.onclick = () => {
           const opponent = game.players[game.opponentOf(playerId)];
           const builder = PARAM_BUILDERS[selectedHandCard.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
           if (params === null) {
             // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
             render();
@@ -307,12 +313,12 @@ function renderHand(playerId) {
       <div class="stat-line">コスト${def?.cost ?? "?"} ${def?.type ?? ""}</div>
       ${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}
     `;
-    if (playerId === game.activePlayerId) {
+    if (playerId === game.activePlayerId && !game.winner) {
       el.onclick = () => {
         if (def?.type === "イベント") {
           const opponent = game.players[game.opponentOf(playerId)];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
           try {
             game.playEvent(playerId, c.uid, params);
@@ -327,7 +333,7 @@ function renderHand(playerId) {
           // 空き枠を選ばせず、クリックした時点で即座に召喚を試みる
           const opponent = game.players[game.opponentOf(playerId)];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? builder({ player, opponent }) : {};
+          const params = builder ? builder({ player, opponent, selfUid: c.uid }) : {};
           if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
           try {
             game.summonFromHand(playerId, c.uid, null, params);
@@ -448,6 +454,38 @@ function render() {
 
   renderStats("p1");
   renderStats("p2");
+
+  if (game.winner) {
+    // 勝敗が決まったら、盤面・手札は最終状態を表示するだけにして
+    // クリック操作は一切受け付けないようにする(誤操作防止)
+    renderBoard("p1");
+    renderBoard("p2");
+    renderHand("p1");
+    renderHand("p2");
+    document.getElementById("btn-attack-face").style.display = "none";
+    document.getElementById("btn-cancel-select").style.display = "none";
+    document.getElementById("btn-end-turn").style.display = "none";
+    document.getElementById("btn-confirm-keep").style.display = "none";
+    document.getElementById("selection-info").textContent = "";
+
+    let banner = document.querySelector(".winner-banner");
+    if (!banner) {
+      banner = document.createElement("div");
+      banner.className = "winner-banner";
+      document.body.prepend(banner);
+    }
+    banner.innerHTML = "";
+    const text = document.createElement("span");
+    text.textContent = `${game.winner} の勝利!`;
+    banner.appendChild(text);
+    const restartBtn = document.createElement("button");
+    restartBtn.textContent = "新しい対戦を始める";
+    restartBtn.style.marginLeft = "12px";
+    restartBtn.onclick = () => location.reload();
+    banner.appendChild(restartBtn);
+    return;
+  }
+
   renderBoard("p1");
   renderBoard("p2");
   renderHand("p1");
@@ -463,16 +501,6 @@ function render() {
     : selectedHandCard
     ? `選択中の手札: ${selectedHandCard.defName}(空き枠をクリックして召喚)`
     : "";
-
-  if (game.winner) {
-    let banner = document.querySelector(".winner-banner");
-    if (!banner) {
-      banner = document.createElement("div");
-      banner.className = "winner-banner";
-      document.body.prepend(banner);
-    }
-    banner.textContent = `${game.winner} の勝利!`;
-  }
 }
 
 document.getElementById("btn-end-turn").onclick = () => {
