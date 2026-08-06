@@ -200,3 +200,24 @@ main {
   padding: 3px 0;
   border-bottom: 1px solid #22262e;
 }
+
+#picker-modal-list {
+  padding: 10px 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#picker-modal-list button.picker-item {
+  text-align: left;
+  background: #262b34;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#picker-modal-list button.picker-item:hover {
+  border-color: var(--accent2);
+}
