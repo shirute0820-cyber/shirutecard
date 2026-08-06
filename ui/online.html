@@ -197,9 +197,42 @@
     <main>
       <section class="player-area" id="area-opponent">
         <h2 id="opponent-label">相手</h2>
-        <div class="stats" id="stats-opponent"></div>
-        <div class="board" id="board-opponent"></div>
-        <div class="hand" id="hand-opponent"></div>
+        <div class="mini-stats" id="stats-opponent"></div>
+        <div class="board-layout">
+          <div class="side-col left-col">
+            <div class="zone-box shield-box">
+              <div class="zone-label">シールド</div>
+              <div class="zone-value shield-value" id="shield-value-opponent">0</div>
+            </div>
+            <div class="zone-box transcend-box" id="transcend-box-opponent">
+              <div class="zone-label">超越</div>
+              <div class="zone-value" id="transcend-value-opponent">-</div>
+            </div>
+            <div class="zone-box clickable-zone" id="storage-zone-opponent">
+              <div class="zone-label">ストレージ</div>
+              <div class="zone-value" id="storage-count-opponent">0</div>
+            </div>
+          </div>
+          <div class="board-row" id="board-opponent"></div>
+          <div class="zone-box event-zone-box">
+            <div class="zone-label">イベント<br />ゾーン</div>
+          </div>
+          <div class="side-col right-stack">
+            <div class="zone-box clickable-zone" id="exile-zone-opponent">
+              <div class="zone-label">除外</div>
+              <div class="zone-value" id="exile-count-opponent">0</div>
+            </div>
+            <div class="zone-box clickable-zone" id="graveyard-zone-opponent">
+              <div class="zone-label">墓地</div>
+              <div class="zone-value" id="graveyard-count-opponent">0</div>
+            </div>
+          </div>
+          <div class="hand-row" id="hand-opponent"></div>
+          <div class="zone-box clickable-zone deck-zone-box" id="deck-zone-opponent">
+            <div class="zone-label">デッキ</div>
+            <div class="zone-value" id="deck-count-opponent">0</div>
+          </div>
+        </div>
       </section>
 
       <section class="controls">
@@ -214,9 +247,42 @@
 
       <section class="player-area" id="area-me">
         <h2 id="me-label">自分</h2>
-        <div class="stats" id="stats-me"></div>
-        <div class="board" id="board-me"></div>
-        <div class="hand" id="hand-me"></div>
+        <div class="board-layout">
+          <div class="side-col left-col">
+            <div class="zone-box shield-box">
+              <div class="zone-label">シールド</div>
+              <div class="zone-value shield-value" id="shield-value-me">0</div>
+            </div>
+            <div class="zone-box transcend-box" id="transcend-box-me">
+              <div class="zone-label">超越</div>
+              <div class="zone-value" id="transcend-value-me">-</div>
+            </div>
+            <div class="zone-box clickable-zone" id="storage-zone-me">
+              <div class="zone-label">ストレージ</div>
+              <div class="zone-value" id="storage-count-me">0</div>
+            </div>
+          </div>
+          <div class="board-row" id="board-me"></div>
+          <div class="zone-box event-zone-box">
+            <div class="zone-label">イベント<br />ゾーン</div>
+          </div>
+          <div class="side-col right-stack">
+            <div class="zone-box clickable-zone" id="exile-zone-me">
+              <div class="zone-label">除外</div>
+              <div class="zone-value" id="exile-count-me">0</div>
+            </div>
+            <div class="zone-box clickable-zone" id="graveyard-zone-me">
+              <div class="zone-label">墓地</div>
+              <div class="zone-value" id="graveyard-count-me">0</div>
+            </div>
+          </div>
+          <div class="hand-row" id="hand-me"></div>
+          <div class="zone-box clickable-zone deck-zone-box" id="deck-zone-me">
+            <div class="zone-label">デッキ</div>
+            <div class="zone-value" id="deck-count-me">0</div>
+          </div>
+        </div>
+        <div class="mini-stats" id="stats-me"></div>
       </section>
     </main>
 
