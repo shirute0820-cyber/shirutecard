@@ -2,6 +2,16 @@ import { GameState } from "../engine/GameState.js";
 import { KEYWORDS, CONFIG } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { serializeGame, hydrateGame } from "../engine/serialization.js";
+import {
+  DECK_SIZE,
+  copyLimitOf,
+  expandDeckCounts,
+  totalCount,
+  validateDeck,
+  saveDeck,
+  loadDeck,
+  listBuildableCards,
+} from "./deckBuilder.js";
 
 // ==========================================================
 // ログ(画面上の簡易ログパネル用)
@@ -26,6 +36,95 @@ function buildSampleDeck() {
   }
   return list;
 }
+
+// ==========================================================
+// デッキ構築(このブラウザに保存される、自分用の40枚デッキ)
+// ==========================================================
+const DECK_SLOT = "mydeck";
+let myDeckCounts = loadDeck(DECK_SLOT) ?? {};
+let deckBuilderDraft = null; // 編集中の一時的な枚数マップ(キャンセルで破棄できるようにする)
+
+function myDeckIsValid() {
+  return validateDeck(myDeckCounts).length === 0;
+}
+
+function updateDeckStatusLabel() {
+  const label = document.getElementById("deck-status-label");
+  const total = totalCount(myDeckCounts);
+  if (myDeckIsValid()) {
+    label.textContent = `準備OK(${total}/${DECK_SIZE}枚)`;
+    label.style.color = "var(--good)";
+  } else {
+    label.textContent = `未完成(${total}/${DECK_SIZE}枚) — 「デッキを編集する」から40枚に揃えてください`;
+    label.style.color = "var(--danger)";
+  }
+}
+
+function openDeckBuilder() {
+  deckBuilderDraft = { ...myDeckCounts };
+  document.getElementById("setup-screen").style.display = "none";
+  document.getElementById("deck-screen").style.display = "block";
+  renderDeckBuilder();
+}
+
+function closeDeckBuilder() {
+  document.getElementById("deck-screen").style.display = "none";
+  document.getElementById("setup-screen").style.display = "block";
+}
+
+function renderDeckBuilder() {
+  const listEl = document.getElementById("deck-card-list");
+  listEl.innerHTML = "";
+  for (const def of listBuildableCards()) {
+    const n = deckBuilderDraft[def.name] ?? 0;
+    const limit = copyLimitOf(def.name);
+    const el = document.createElement("div");
+    el.className = `deck-card theme-${def.theme ?? ""}`;
+    el.innerHTML = `
+      <div class="name">${def.name}</div>
+      <div class="meta">コスト${def.cost ?? "?"} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
+      <div class="qty-row">
+        <button data-action="minus">-</button>
+        <span>${n} / ${limit}</span>
+        <button data-action="plus">+</button>
+      </div>
+    `;
+    el.querySelector('[data-action="minus"]').onclick = () => {
+      if (n > 0) deckBuilderDraft[def.name] = n - 1;
+      if (deckBuilderDraft[def.name] === 0) delete deckBuilderDraft[def.name];
+      renderDeckBuilder();
+    };
+    const plusBtn = el.querySelector('[data-action="plus"]');
+    plusBtn.disabled = n >= limit;
+    plusBtn.onclick = () => {
+      deckBuilderDraft[def.name] = n + 1;
+      renderDeckBuilder();
+    };
+    listEl.appendChild(el);
+  }
+
+  const total = totalCount(deckBuilderDraft);
+  const countEl = document.getElementById("deck-count");
+  countEl.textContent = `${total}/${DECK_SIZE}`;
+  countEl.className = "count " + (total === DECK_SIZE ? "ok" : "ng");
+
+  const errors = validateDeck(deckBuilderDraft);
+  document.getElementById("deck-errors").textContent = errors.join("\n");
+  document.getElementById("btn-deck-save").disabled = errors.length > 0;
+}
+
+document.getElementById("btn-open-deck-builder").onclick = openDeckBuilder;
+document.getElementById("btn-deck-cancel").onclick = closeDeckBuilder;
+document.getElementById("btn-deck-save").onclick = () => {
+  const errors = validateDeck(deckBuilderDraft);
+  if (errors.length > 0) return;
+  myDeckCounts = { ...deckBuilderDraft };
+  saveDeck(DECK_SLOT, myDeckCounts);
+  updateDeckStatusLabel();
+  closeDeckBuilder();
+};
+
+updateDeckStatusLabel();
 
 // ==========================================================
 // Firebase接続まわり
@@ -64,17 +163,22 @@ document.getElementById("btn-connect").onclick = async () => {
 
 document.getElementById("btn-create-room").onclick = async () => {
   const status = document.getElementById("setup-status");
+  if (!myDeckIsValid()) {
+    status.textContent = "先に「デッキを編集する」から40枚のデッキを組んでください。";
+    return;
+  }
   roomCode = document.getElementById("room-code-input").value.trim() || `room-${Date.now()}`;
   myPlayerId = "p1";
   roomWasReset = false;
+  game = null;
 
   try {
     // 既に同じ部屋コードが存在する場合、誤って上書き(ゲームリセット)しないようにする。
-    // 再接続したい場合は「参加する」を使う。
-    const existingSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
+    // 再接続したい場合は「参加する」/「先攻として再接続する」を使う。
+    const existingSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/meta`));
     if (existingSnap.exists()) {
       status.textContent =
-        "この部屋コードは既に使われています。再接続したい場合は「参加する」を使ってください(「部屋を作る」を押すとゲームが最初からリセットされます)。";
+        "この部屋コードは既に使われています。再接続したい場合は「参加する」または「先攻として再接続する」を使ってください。";
       return;
     }
   } catch (err) {
@@ -82,19 +186,17 @@ document.getElementById("btn-create-room").onclick = async () => {
     return;
   }
 
-  game = new GameState({
-    player1Deck: buildSampleDeck(),
-    player2Deck: buildSampleDeck(),
-    firstPlayerId: "p1",
-    log: pushLog,
-  });
-  game.startGame();
-
   try {
-    await dbRefFns.set(dbRefFns.ref(db, `rooms/${roomCode}/state`), serializeGame(game));
-    await dbRefFns.set(dbRefFns.ref(db, `rooms/${roomCode}/meta`), { hostConnected: true, guestConnected: false });
+    // この時点ではまだ対戦を初期化しない(後攻のデッキがまだ分からないため)。
+    // 自分のデッキだけを保存し、両者のデッキが揃ってから対戦を作る。
+    await dbRefFns.set(dbRefFns.ref(db, `rooms/${roomCode}/meta`), {
+      hostConnected: true,
+      guestConnected: false,
+      hostDeck: expandDeckCounts(myDeckCounts),
+    });
     status.textContent = `部屋「${roomCode}」を作成しました。相手にこの部屋コードを伝えて「参加する」を押してもらってください。`;
     subscribeToRoom();
+    subscribeToMetaForInit();
     enterGameScreen();
   } catch (err) {
     status.textContent = `部屋作成エラー: ${err.message}`;
@@ -102,14 +204,14 @@ document.getElementById("btn-create-room").onclick = async () => {
 };
 
 document.getElementById("btn-join-room").onclick = async () => {
-  await connectExistingRoom("p2", { markGuestConnected: true });
+  await connectExistingRoom("p2");
 };
 
 document.getElementById("btn-rejoin-host").onclick = async () => {
-  await connectExistingRoom("p1", { markGuestConnected: false });
+  await connectExistingRoom("p1");
 };
 
-async function connectExistingRoom(playerId, { markGuestConnected }) {
+async function connectExistingRoom(playerId) {
   const status = document.getElementById("setup-status");
   roomCode = document.getElementById("room-code-input").value.trim();
   if (!roomCode) {
@@ -118,22 +220,76 @@ async function connectExistingRoom(playerId, { markGuestConnected }) {
   }
   myPlayerId = playerId;
   roomWasReset = false;
+  game = null;
 
   try {
-    const snap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
-    if (!snap.exists()) {
+    // 既に対戦が始まっている(state が存在する)なら、再接続として扱う
+    const stateSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
+    if (stateSnap.exists()) {
+      game = hydrateGame(stateSnap.val(), { log: pushLog });
+      subscribeToRoom();
+      enterGameScreen();
+      return;
+    }
+
+    // まだ対戦が始まっていない場合
+    const metaSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/meta`));
+    if (!metaSnap.exists()) {
       status.textContent = "その部屋コードは見つかりませんでした。";
       return;
     }
-    game = hydrateGame(snap.val(), { log: pushLog });
-    if (markGuestConnected) {
-      await dbRefFns.update(dbRefFns.ref(db, `rooms/${roomCode}/meta`), { guestConnected: true });
+    const meta = metaSnap.val();
+
+    if (playerId === "p2") {
+      // 後攻としての初回参加: 自分のデッキを提出する
+      if (!myDeckIsValid()) {
+        status.textContent = "先に「デッキを編集する」から40枚のデッキを組んでください。";
+        return;
+      }
+      if (!meta.guestDeck) {
+        await dbRefFns.update(dbRefFns.ref(db, `rooms/${roomCode}/meta`), {
+          guestConnected: true,
+          guestDeck: expandDeckCounts(myDeckCounts),
+        });
+      }
+      status.textContent = "デッキを提出しました。相手の準備が整い次第、対戦が始まります。";
+    } else {
+      status.textContent = "部屋の準備ができ次第、対戦が始まります(相手の参加を待っています)。";
     }
+
     subscribeToRoom();
+    subscribeToMetaForInit();
     enterGameScreen();
   } catch (err) {
     status.textContent = `参加エラー: ${err.message}`;
   }
+}
+
+// 両者のデッキ(host/guest)が揃ったら、どちらかのクライアントが対戦を初期化する。
+// 同時に両方が初期化を試みても、Firebaseのトランザクションにより一度しか成功しない。
+function subscribeToMetaForInit() {
+  dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/meta`), async (snap) => {
+    if (!snap.exists()) return;
+    const meta = snap.val();
+    if (!meta.hostDeck || !meta.guestDeck) return;
+
+    try {
+      const stateRef = dbRefFns.ref(db, `rooms/${roomCode}/state`);
+      await dbRefFns.runTransaction(stateRef, (currentData) => {
+        if (currentData !== null) return currentData; // 既に初期化済みなら何もしない
+        const initGame = new GameState({
+          player1Deck: meta.hostDeck,
+          player2Deck: meta.guestDeck,
+          firstPlayerId: "p1",
+          log: () => {},
+        });
+        initGame.startGame();
+        return serializeGame(initGame);
+      });
+    } catch (err) {
+      console.error("対戦初期化エラー:", err);
+    }
+  });
 }
 
 let roomWasReset = false; // 自分/相手がホームに戻って部屋をリセットした後、二重処理を防ぐフラグ
@@ -165,7 +321,7 @@ function subscribeToRoom() {
 // 呼ぶまで待機する。自分がその次のプレイヤーなら、ここで自動的に処理する
 // (選択が要らなければ即startTurn、必要なら選択UIを出す)。
 async function maybeStartMyTurn() {
-  if (!game.gameStarted) return;
+  if (!game || !game.gameStarted) return;
   if (game.phase !== "between" || game.pendingNextPlayerId !== myPlayerId) return;
   const needed = game.peekKeepSelection(myPlayerId);
   if (needed) {
@@ -599,7 +755,11 @@ function renderStats(role) {
 }
 
 function render() {
-  if (!game) return;
+  if (!game) {
+    // 対戦相手のデッキがまだ揃っていない(部屋作成直後/参加直後)の待機状態
+    document.getElementById("turn-info").textContent = "相手の準備を待っています...";
+    return;
+  }
 
   if (!game.gameStarted) {
     document.getElementById("turn-info").textContent = "マリガンフェーズ";
