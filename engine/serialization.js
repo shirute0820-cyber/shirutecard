@@ -107,6 +107,7 @@ function deserializePlayer(o) {
     hand: (o.hand ?? []).map((c) => ({ ...c })),
     storage: o.storage ?? [],
     graveyard: o.graveyard ?? [],
+    exile: o.exile ?? [],
     board: deserializeBoard(o.board),
   };
 }
