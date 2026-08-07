@@ -211,11 +211,15 @@
       <section class="player-area" id="area-opponent">
         <h2 id="opponent-label">相手</h2>
         <div class="mini-stats" id="stats-opponent"></div>
-        <div class="board-layout">
+        <div class="board-layout mirrored">
           <div class="side-col left-col">
             <div class="zone-box shield-box">
               <div class="zone-label">シールド</div>
               <div class="zone-value shield-value" id="shield-value-opponent">0</div>
+            </div>
+            <div class="zone-box hp-box">
+              <div class="zone-label">HP</div>
+              <div class="zone-value" id="hp-value-opponent">0</div>
             </div>
             <div class="zone-box transcend-box" id="transcend-box-opponent">
               <div class="zone-label">超越</div>
@@ -225,15 +229,16 @@
               <div class="zone-label">ストレージ</div>
               <div class="zone-value" id="storage-count-opponent">0</div>
             </div>
+            <div class="zone-link exile-mini-link" id="exile-zone-opponent">除外 <span id="exile-count-opponent">0</span></div>
           </div>
           <div class="board-row" id="board-opponent"></div>
           <div class="zone-box event-zone-box">
             <div class="zone-label">イベント<br />ゾーン</div>
           </div>
           <div class="side-col right-stack">
-            <div class="zone-box clickable-zone" id="exile-zone-opponent">
-              <div class="zone-label">除外</div>
-              <div class="zone-value" id="exile-count-opponent">0</div>
+            <div class="zone-box cost-box">
+              <div class="zone-label">コスト</div>
+              <div class="zone-value" id="cost-value-opponent">0/0</div>
             </div>
             <div class="zone-box clickable-zone" id="graveyard-zone-opponent">
               <div class="zone-label">墓地</div>
@@ -250,10 +255,7 @@
 
       <section class="controls">
         <button id="btn-mulligan-me" style="display:none;">マリガン確定</button>
-        <button id="btn-end-turn">ターン終了</button>
         <button id="btn-confirm-keep" style="display:none;">選択を確定(未選択なら「何も残さない」)</button>
-        <button id="btn-attack-face" disabled>選択中のモンスターでプレイヤーへ直接攻撃</button>
-        <button id="btn-cancel-select">選択解除</button>
         <button id="btn-end-game">ゲームを終了する</button>
         <button id="btn-end-game-confirm" style="display:none; background:var(--danger); color:#fff;">本当に終了する(部屋のデータを削除します)</button>
         <button id="btn-return-home" style="display:none;">ホーム画面に戻る</button>
@@ -268,6 +270,10 @@
               <div class="zone-label">シールド</div>
               <div class="zone-value shield-value" id="shield-value-me">0</div>
             </div>
+            <div class="zone-box hp-box">
+              <div class="zone-label">HP</div>
+              <div class="zone-value" id="hp-value-me">0</div>
+            </div>
             <div class="zone-box transcend-box" id="transcend-box-me">
               <div class="zone-label">超越</div>
               <div class="zone-value" id="transcend-value-me">-</div>
@@ -276,15 +282,16 @@
               <div class="zone-label">ストレージ</div>
               <div class="zone-value" id="storage-count-me">0</div>
             </div>
+            <div class="zone-link exile-mini-link" id="exile-zone-me">除外 <span id="exile-count-me">0</span></div>
           </div>
           <div class="board-row" id="board-me"></div>
           <div class="zone-box event-zone-box">
             <div class="zone-label">イベント<br />ゾーン</div>
           </div>
           <div class="side-col right-stack">
-            <div class="zone-box clickable-zone" id="exile-zone-me">
-              <div class="zone-label">除外</div>
-              <div class="zone-value" id="exile-count-me">0</div>
+            <div class="zone-box cost-box">
+              <div class="zone-label">コスト</div>
+              <div class="zone-value" id="cost-value-me">0/0</div>
             </div>
             <div class="zone-box clickable-zone" id="graveyard-zone-me">
               <div class="zone-label">墓地</div>
@@ -296,6 +303,7 @@
             <div class="zone-label">デッキ</div>
             <div class="zone-value" id="deck-count-me">0</div>
           </div>
+          <button id="btn-end-turn" class="turn-action-btn">ターン終了</button>
         </div>
         <div class="mini-stats" id="stats-me"></div>
       </section>
