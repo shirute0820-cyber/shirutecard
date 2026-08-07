@@ -234,6 +234,21 @@ export class GameState {
     const hpSum = player.board.reduce((sum, m) => sum + (m ? m.currentHp : 0), 0);
     player.shield += Math.floor(hpSum / 2);
 
+    // 「ターン終了時まで」の一時的なステータス上昇(例:リバーススケイル)を元に戻す。
+    // シールドのスナップショット計算(直前)には、この一時バフがかかった状態の
+    // HPを反映させたいため、シールド計算より後にここで戻す。
+    for (const m of player.board) {
+      if (!m) continue;
+      if (m.tempAtkThisTurn) {
+        m.currentAtk -= m.tempAtkThisTurn;
+        m.tempAtkThisTurn = 0;
+      }
+      if (m.tempHpThisTurn) {
+        m.currentHp -= m.tempHpThisTurn;
+        m.tempHpThisTurn = 0;
+      }
+    }
+
     this.log(`${this.activePlayerId} ターン終了。手札${player.hand.length}枚、シールド${player.shield}`);
 
     const nextId = this.opponentOf(this.activePlayerId);
