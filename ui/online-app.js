@@ -181,6 +181,31 @@ let suppressNextPush = false; // 自分が書き込んだ直後のonValueで二�
 
 const FIREBASE_CONFIG_STORAGE_KEY = "cardgame-firebase-config";
 
+// 部屋コードごとに「自分がp1(作った側)/p2(参加した側)のどちらだったか」を
+// このブラウザに保存しておく。「再接続する」ボタンで、部屋コードだけから
+// 役割を自動的に判定するために使う。
+const ROOM_PLAYER_STORAGE_KEY = "cardgame-room-player-map";
+
+function saveRoomPlayerRole(code, playerId) {
+  let map = {};
+  try {
+    map = JSON.parse(localStorage.getItem(ROOM_PLAYER_STORAGE_KEY) || "{}");
+  } catch {
+    map = {};
+  }
+  map[code] = playerId;
+  localStorage.setItem(ROOM_PLAYER_STORAGE_KEY, JSON.stringify(map));
+}
+
+function getSavedRoomPlayerRole(code) {
+  try {
+    const map = JSON.parse(localStorage.getItem(ROOM_PLAYER_STORAGE_KEY) || "{}");
+    return map[code] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function connectFirebase(configText) {
   const status = document.getElementById("setup-status");
   const firebaseConfig = JSON.parse(configText);
@@ -201,7 +226,7 @@ async function connectFirebase(configText) {
   document.getElementById("room-code-input").disabled = false;
   document.getElementById("btn-create-room").disabled = false;
   document.getElementById("btn-join-room").disabled = false;
-  document.getElementById("btn-rejoin-host").disabled = false;
+  document.getElementById("btn-reconnect-room").disabled = false;
 }
 
 document.getElementById("btn-connect").onclick = async () => {
@@ -266,6 +291,7 @@ document.getElementById("btn-create-room").onclick = async () => {
       guestConnected: false,
       hostDeck: expandDeckCounts(getActiveDeck().counts),
     });
+    saveRoomPlayerRole(roomCode, "p1");
     status.textContent = `部屋「${roomCode}」を作成しました。相手にこの部屋コードを伝えて「参加する」を押してもらってください。`;
     subscribeToRoom();
     subscribeToMetaForInit();
@@ -276,11 +302,26 @@ document.getElementById("btn-create-room").onclick = async () => {
 };
 
 document.getElementById("btn-join-room").onclick = async () => {
+  // 「参加する」は常に後攻(p2)としての初回参加専用
   await connectExistingRoom("p2");
 };
 
-document.getElementById("btn-rejoin-host").onclick = async () => {
-  await connectExistingRoom("p1");
+document.getElementById("btn-reconnect-room").onclick = async () => {
+  // 「再接続する」は、作った側(p1)・参加した側(p2)のどちらでも使える。
+  // このブラウザに保存された「部屋コード→役割」の記録から自動的に判定する。
+  const status = document.getElementById("setup-status");
+  const code = document.getElementById("room-code-input").value.trim();
+  if (!code) {
+    status.textContent = "部屋コードを入力してください。";
+    return;
+  }
+  const savedRole = getSavedRoomPlayerRole(code);
+  if (!savedRole) {
+    status.textContent =
+      "このブラウザにはこの部屋の役割情報が見つかりませんでした。以前このブラウザで「部屋を作る」または「参加する」を行った部屋のみ、「再接続する」が使えます。";
+    return;
+  }
+  await connectExistingRoom(savedRole);
 };
 
 async function connectExistingRoom(playerId) {
@@ -298,6 +339,7 @@ async function connectExistingRoom(playerId) {
     // 既に対戦が始まっている(state が存在する)なら、再接続として扱う
     const stateSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
     if (stateSnap.exists()) {
+      saveRoomPlayerRole(roomCode, playerId);
       game = hydrateGame(stateSnap.val(), { log: pushLog });
       subscribeToRoom();
       enterGameScreen();
@@ -313,12 +355,12 @@ async function connectExistingRoom(playerId) {
     const meta = metaSnap.val();
 
     if (playerId === "p2") {
-      // 後攻としての初回参加: 自分のデッキを提出する
-      if (!myDeckIsValid()) {
-        status.textContent = "先に「デッキを編集する」から40枚のデッキを組んでください。";
-        return;
-      }
       if (!meta.guestDeck) {
+        // 後攻としての初回参加: 自分のデッキを提出する
+        if (!myDeckIsValid()) {
+          status.textContent = "先に「デッキを編集する」から40枚のデッキを組んでください。";
+          return;
+        }
         await dbRefFns.update(dbRefFns.ref(db, `rooms/${roomCode}/meta`), {
           guestConnected: true,
           guestDeck: expandDeckCounts(getActiveDeck().counts),
@@ -329,6 +371,7 @@ async function connectExistingRoom(playerId) {
       status.textContent = "部屋の準備ができ次第、対戦が始まります(相手の参加を待っています)。";
     }
 
+    saveRoomPlayerRole(roomCode, playerId);
     subscribeToRoom();
     subscribeToMetaForInit();
     enterGameScreen();
