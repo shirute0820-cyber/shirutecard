@@ -193,5 +193,7 @@ export function createCardInstance(defName, ownerId, instanceId) {
     attackRestriction: null,    // 'monsterOnly' 等、そのターン限定の攻撃制限
     canBeSpecialSummoned: !def.cannotBeSpecialSummoned,
     onceEffectUsedThisTurn: {}, // 「1ターンに1度」系の個別フラグ置き場
+    tempAtkThisTurn: 0, // 「ターン終了時まで」の一時的な攻撃力バフ(例:リバーススケイル)。endTurn()で自動的に元に戻す
+    tempHpThisTurn: 0,  // 同上、体力版
   };
 }
