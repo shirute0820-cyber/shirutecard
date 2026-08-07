@@ -430,6 +430,7 @@ function subscribeToRoom() {
     keepSelection = null;
     selectedAttacker = null;
     selectedHandCard = null;
+    endGameConfirmPending = false;
     render();
     maybeStartMyTurn();
   });
@@ -477,6 +478,7 @@ function returnToHomeScreen(message) {
   selectedHandCard = null;
   keepSelection = null;
   mulliganReturn = new Set();
+  endGameConfirmPending = false;
 
   const banner = document.querySelector(".winner-banner");
   if (banner) banner.remove();
@@ -486,18 +488,36 @@ function returnToHomeScreen(message) {
   document.getElementById("setup-status").textContent = message ?? "";
 }
 
-document.getElementById("btn-return-home").onclick = async () => {
+// 部屋のデータ(state/meta)を削除してホーム画面に戻る共通処理。
+// 破壊的操作のため、対象の部屋コード(codeとして呼び出し時点の値を固定でキャプチャ)
+// のみを削除するようスコープを絞っている。ローカルの画面遷移を先に行ってから
+// Firebase側を削除する(削除に失敗しても、少なくとも自分はホームに戻れる状態にする)。
+async function deleteRoomDataAndGoHome(message) {
   const code = roomCode;
-  // 先にローカルをホーム画面へ戻してから、Firebase側の部屋データを削除する。
-  // (削除に失敗しても、少なくとも自分はホームに戻れる状態にしておく)
-  returnToHomeScreen("部屋をリセットしてホーム画面に戻りました。");
+  returnToHomeScreen(message);
   try {
     await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/state`), null);
     await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/meta`), null);
   } catch (err) {
-    // 削除に失敗しても、既にローカルはホーム画面に戻っているので致命的ではない
     console.error("部屋の削除に失敗しました:", err);
   }
+}
+
+document.getElementById("btn-return-home").onclick = async () => {
+  await deleteRoomDataAndGoHome("部屋をリセットしてホーム画面に戻りました。");
+};
+
+// 「ゲームを終了する」：勝敗が決まる前でも、対戦中いつでも中断できるようにする。
+// 誤操作で対戦データが消えてしまうと取り返しがつかないため、window.confirmではなく
+// 既存の削除ボタンと同様の「押す→本当に終了する、の2段階ボタン」方式にする。
+document.getElementById("btn-end-game").onclick = () => {
+  endGameConfirmPending = true;
+  render();
+};
+
+document.getElementById("btn-end-game-confirm").onclick = async () => {
+  endGameConfirmPending = false;
+  await deleteRoomDataAndGoHome("ゲームを終了し、部屋をリセットしてホーム画面に戻りました。");
 };
 
 function opponentId() {
@@ -511,6 +531,7 @@ let selectedHandCard = null;
 let selectedAttacker = null;
 let keepSelection = null;
 let mulliganReturn = new Set();
+let endGameConfirmPending = false; // 「ゲームを終了する」の2段階確認(誤操作防止のため)
 
 export const CANCELLED = Symbol("cancelled");
 
@@ -910,7 +931,20 @@ function renderStats(role) {
   }
 }
 
+// 「ゲームを終了する」関連ボタンの表示切り替え。render()の冒頭で必ず呼び出す。
+// 勝敗が決まった後は、専用の「ホーム画面に戻る」ボタン(1クリックで確定)に一本化し、
+// こちらの2段階確認ボタンは表示しない(二重の削除導線を作らないため)。
+function updateEndGameButtons() {
+  const showEndGameOption = !game || !game.winner;
+  document.getElementById("btn-end-game").style.display =
+    showEndGameOption && !endGameConfirmPending ? "" : "none";
+  document.getElementById("btn-end-game-confirm").style.display =
+    showEndGameOption && endGameConfirmPending ? "" : "none";
+}
+
 function render() {
+  updateEndGameButtons();
+
   if (!game) {
     // 対戦相手のデッキがまだ揃っていない(部屋作成直後/参加直後)の待機状態
     document.getElementById("turn-info").textContent = "相手の準備を待っています...";
