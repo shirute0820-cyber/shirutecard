@@ -25,7 +25,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-08.1";
+const APP_VERSION = "2026-08-08.2";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ==========================================================
@@ -638,6 +638,12 @@ const PARAM_BUILDERS = {
     const t = await pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+  ドラゴンの招集: async ({ player }) => {
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 1) return {}; // 選択の余地がない(0または1体)ため自動判定
+    const chosen = await pickUpTo(eligible, 2, "デッキに戻す亜竜種");
+    return { returnTargets: chosen };
   },
   エンダーリコリス・ワイバーン: async ({ player }) => {
     const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
