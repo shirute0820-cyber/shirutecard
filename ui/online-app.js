@@ -886,12 +886,15 @@ function renderStats(role) {
   const ownerId = role === "me" ? myPlayerId : opponentId();
   const player = game.players[ownerId];
 
-  // 常設のミニステータス(HP・コスト・後攻追加ドロー)
+  // 常設のミニステータス欄は、後攻追加ドローボタンの設置場所としてのみ使う
+  // (HP・コストは左列/右列の専用ボックスに表示するため、ここにはテキストを出さない)
   const el = document.getElementById(`stats-${role}`);
-  el.innerHTML = `HP: <b>${player.hp}</b> ／ コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b>`;
+  el.innerHTML = "";
 
-  // 盤面まわりの常設ゾーン(シールド・超越・ストレージ・除外・墓地・デッキ)
+  // 盤面まわりの常設ゾーン(シールド・HP・超越・ストレージ・除外・コスト・墓地・デッキ)
   document.getElementById(`shield-value-${role}`).textContent = player.shield;
+  document.getElementById(`hp-value-${role}`).textContent = player.hp;
+  document.getElementById(`cost-value-${role}`).textContent = `${player.resourceAvailable}/${player.resourceCap}`;
 
   const trStatus = game.playerTranscendAvailability(ownerId);
   const trBox = document.getElementById(`transcend-box-${role}`);
@@ -942,8 +945,79 @@ function updateEndGameButtons() {
     showEndGameOption && endGameConfirmPending ? "" : "none";
 }
 
+// 「ターン終了」ボタン(自分側のデッキの下に常設)の表示・ラベル・クリック処理を一括管理。
+// render()の冒頭で必ず呼び出す。
+// - 勝敗が決まった後、または「残す手札」選択中(confirm-keepボタンを使う)は非表示
+// - マリガン中は「ドローフェイズ」(押せない)
+// - 相手のターン中は「相手ターン中」(押せない)
+// - 自分が行動できるときだけ「ターン終了」(押せる)
+function updateTurnActionButton() {
+  const btn = document.getElementById("btn-end-turn");
+  if (!game || game.winner || keepSelection) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
+  if (!game.gameStarted) {
+    btn.textContent = "ドローフェイズ";
+    btn.disabled = true;
+    btn.onclick = null;
+  } else if (game.activePlayerId !== myPlayerId) {
+    btn.textContent = "相手ターン中";
+    btn.disabled = true;
+    btn.onclick = null;
+  } else {
+    btn.textContent = "ターン終了";
+    btn.disabled = false;
+    btn.onclick = async () => {
+      selectedAttacker = null;
+      selectedHandCard = null;
+      try {
+        game.endTurn();
+        await pushState();
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+      render();
+      // 自分が(1対1なので基本起こらないが)次のプレイヤーでもあるケースに備えて確認
+      await maybeStartMyTurn();
+    };
+  }
+}
+
+// モンスターを選択中に相手の手札ゾーンをクリックすると、プレイヤーへの直接攻撃になる。
+// 選択中かつ行動可能なときだけ、相手の手札ゾーンにヒント表示とクリック操作を付与する。
+// render()の冒頭で必ず呼び出す。
+function updateAttackFaceZone() {
+  const zone = document.getElementById("hand-opponent");
+  const canAttackFace = !!(
+    game &&
+    game.gameStarted &&
+    !game.winner &&
+    game.activePlayerId === myPlayerId &&
+    !keepSelection &&
+    selectedAttacker
+  );
+  zone.classList.toggle("attack-target-hint", canAttackFace);
+  zone.onclick = canAttackFace
+    ? async () => {
+        try {
+          game.attack(myPlayerId, selectedAttacker, { type: "player" });
+          await pushState();
+        } catch (err) {
+          alert(err.message);
+        }
+        selectedAttacker = null;
+        render();
+      }
+    : null;
+}
+
 function render() {
   updateEndGameButtons();
+  updateTurnActionButton();
+  updateAttackFaceZone();
 
   if (!game) {
     // 対戦相手のデッキがまだ揃っていない(部屋作成直後/参加直後)の待機状態
@@ -964,10 +1038,7 @@ function render() {
     renderHand("me");
     renderHand("opponent");
 
-    document.getElementById("btn-end-turn").style.display = "none";
     document.getElementById("btn-confirm-keep").style.display = "none";
-    document.getElementById("btn-attack-face").style.display = "none";
-    document.getElementById("btn-cancel-select").style.display = "none";
 
     const btnM = document.getElementById("btn-mulligan-me");
     btnM.style.display = "";
@@ -981,8 +1052,6 @@ function render() {
   }
 
   document.getElementById("btn-mulligan-me").style.display = "none";
-  document.getElementById("btn-attack-face").style.display = "";
-  document.getElementById("btn-cancel-select").style.display = "";
 
   document.getElementById("turn-info").textContent =
     game.phase === "between"
@@ -1000,9 +1069,6 @@ function render() {
     renderHand("me");
     renderHand("opponent");
 
-    document.getElementById("btn-attack-face").style.display = "none";
-    document.getElementById("btn-cancel-select").style.display = "none";
-    document.getElementById("btn-end-turn").style.display = "none";
     document.getElementById("btn-confirm-keep").style.display = "none";
     document.getElementById("selection-info").textContent = "";
     document.getElementById("btn-return-home").style.display = "";
@@ -1023,14 +1089,11 @@ function render() {
   renderHand("me");
   renderHand("opponent");
 
-  const isMyAction = game.activePlayerId === myPlayerId;
-  document.getElementById("btn-attack-face").disabled = !selectedAttacker || !isMyAction;
-  document.getElementById("btn-end-turn").style.display = isMyAction && !keepSelection ? "" : "none";
   document.getElementById("btn-confirm-keep").style.display = keepSelection ? "" : "none";
   document.getElementById("selection-info").textContent = keepSelection
     ? `次ターン手札:残す${CONFIG.HAND_KEEP_SIZE}枚まで選択中(未選択のまま確定すると「何も残さない」)`
     : selectedAttacker
-    ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、またはプレイヤーへ直接攻撃ボタン)`
+    ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、または相手の手札ゾーンをクリックでプレイヤーへ直接攻撃)`
     : selectedHandCard
     ? `選択中の手札: ${selectedHandCard.defName}(空き枠をクリックして召喚)`
     : "";
@@ -1066,24 +1129,6 @@ document.getElementById("btn-mulligan-me").onclick = async () => {
   await maybeStartMyTurn();
 };
 
-document.getElementById("btn-end-turn").onclick = async () => {
-  if (keepSelection) return;
-  if (!game.gameStarted || game.activePlayerId !== myPlayerId) return;
-  selectedAttacker = null;
-  selectedHandCard = null;
-
-  try {
-    game.endTurn();
-    await pushState();
-  } catch (err) {
-    alert(err.message);
-    return;
-  }
-  render();
-  // 自分が(1対1なので基本起こらないが)次のプレイヤーでもあるケースに備えて確認
-  await maybeStartMyTurn();
-};
-
 document.getElementById("btn-confirm-keep").onclick = async () => {
   if (!keepSelection) return;
   try {
@@ -1094,24 +1139,6 @@ document.getElementById("btn-confirm-keep").onclick = async () => {
     return;
   }
   keepSelection = null;
-  render();
-};
-
-document.getElementById("btn-attack-face").onclick = async () => {
-  if (!selectedAttacker) return;
-  try {
-    game.attack(myPlayerId, selectedAttacker, { type: "player" });
-    await pushState();
-  } catch (err) {
-    alert(err.message);
-  }
-  selectedAttacker = null;
-  render();
-};
-
-document.getElementById("btn-cancel-select").onclick = () => {
-  selectedAttacker = null;
-  selectedHandCard = null;
   render();
 };
 
