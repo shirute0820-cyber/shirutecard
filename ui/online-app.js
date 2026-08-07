@@ -25,7 +25,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-07.1";
+const APP_VERSION = "2026-08-08.1";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ==========================================================
@@ -186,7 +186,14 @@ let dbRefFns = null; // { ref, set, onValue, get, update }
 let roomCode = null;
 let myPlayerId = null; // "p1" | "p2"
 let game = null;
-let suppressNextPush = false; // 自分が書き込んだ直後のonValueで二重処理しないためのフラグ(実害はないが無駄な再描画を減らす)
+// 自分の書き込みが少し間を置いて2回続く(例:召喚→すぐ超越、など)と、
+// 1回分しか吸収できない単純なbooleanフラグ(旧suppressNextPush)では、
+// 2回目の書き込みのエコーを「相手からの更新」と誤認して自分のgameを
+// 巻き戻してしまうことがあった(結果、直前の超越等の変更が消え、以後の
+// 操作が古い状態に対して行われて「攻撃できません」等の不可解なエラーになる)。
+// これを避けるため、各スナップショットのupdatedAt(書き込み時刻)を比較し、
+// 「自分が既に知っている時刻以下のスナップショットは無視する」方式にする。
+let localStateVersion = 0;
 
 const FIREBASE_CONFIG_STORAGE_KEY = "cardgame-firebase-config";
 
@@ -431,15 +438,18 @@ function subscribeToRoom() {
       }
       return;
     }
-    if (suppressNextPush) {
-      suppressNextPush = false;
-      return;
-    }
-    game = hydrateGame(snap.val(), { log: pushLog });
+    const incoming = snap.val();
+    // 自分の書き込みのエコー、または既に反映済みの(自分の方が新しい)スナップショットは無視する。
+    // これにより、短い間隔で連続して自分が書き込んだ場合(例:召喚した直後に超越する、等)でも、
+    // 古いスナップショットで自分のgameを巻き戻してしまうことがなくなる。
+    if ((incoming.updatedAt ?? 0) <= localStateVersion) return;
+    localStateVersion = incoming.updatedAt ?? localStateVersion;
+    game = hydrateGame(incoming, { log: pushLog });
     keepSelection = null;
     selectedAttacker = null;
     selectedHandCard = null;
     endGameConfirmPending = false;
+    transcendSelectMode = false;
     render();
     maybeStartMyTurn();
   });
@@ -463,8 +473,9 @@ async function maybeStartMyTurn() {
 }
 
 async function pushState() {
-  suppressNextPush = true;
-  await dbRefFns.set(dbRefFns.ref(db, `rooms/${roomCode}/state`), serializeGame(game));
+  const payload = serializeGame(game);
+  localStateVersion = payload.updatedAt;
+  await dbRefFns.set(dbRefFns.ref(db, `rooms/${roomCode}/state`), payload);
 }
 
 function enterGameScreen() {
@@ -541,10 +552,11 @@ let selectedAttacker = null;
 let keepSelection = null;
 let mulliganReturn = new Set();
 let endGameConfirmPending = false; // 「ゲームを終了する」の2段階確認(誤操作防止のため)
+let transcendSelectMode = false; // 左列の「超越」ボックスをクリックした後、対象モンスターの選択待ちかどうか
 
 export const CANCELLED = Symbol("cancelled");
 
-function pickFromList(items, label, renderLabel) {
+function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル") {
   return new Promise((resolve) => {
     const overlay = document.getElementById("picker-modal-overlay");
     const title = document.getElementById("picker-modal-title");
@@ -563,6 +575,7 @@ function pickFromList(items, label, renderLabel) {
       };
       list.appendChild(btn);
     }
+    cancelBtn.textContent = cancelLabel;
     cancelBtn.onclick = () => {
       overlay.style.display = "none";
       resolve(CANCELLED);
@@ -580,6 +593,20 @@ export async function pickHandCard(candidates, label) {
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
   return pickFromList(candidates, label, (c) => c.defName);
+}
+// 「〜できる」系の複数選択(最大max体)。1体ずつ選んでいき、いつでも
+// 「これ以上選ばない」で打ち切れる(0体選択も可能=完全に任意)。
+async function pickUpTo(names, max, label) {
+  const pool = [...names];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const cancelLabel = chosen.length > 0 ? `これ以上選ばない(${chosen.length}体で確定)` : "誰も選ばない";
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体まで選択可)`, (n) => n, cancelLabel);
+    if (pick === CANCELLED) break;
+    chosen.push(pick);
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
 }
 const PARAM_BUILDERS = {
   投石: async ({ opponent }) => {
@@ -611,6 +638,12 @@ const PARAM_BUILDERS = {
     const t = await pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+  エンダーリコリス・ワイバーン: async ({ player }) => {
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 2) return {}; // 選択の余地がないため、自動で(最大2体)蘇生する
+    const chosen = await pickUpTo(eligible, 2, "墓地から蘇生する亜竜種");
+    return { reviveTargets: chosen };
   },
 };
 
@@ -663,18 +696,27 @@ function renderMonsterCard(ownerId, instance) {
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
   if (ownerId === myPlayerId && isMyAction) {
-    const trStatus = game.transcendStatus(myPlayerId, instance);
-    if (trStatus.available) {
-      const btn = document.createElement("button");
-      btn.className = "tr-btn";
-      btn.textContent = "超越(使用可能)";
-      btn.onclick = async (e) => {
-        e.stopPropagation();
+    // 超越がまだ使えない状態の残りターン数・使用可否は左列の常設「超越」ボックスに
+    // プレイヤー単位で表示・操作するため、モンスターカード上には超越ボタンを置かない
+    if (transcendSelectMode) el.classList.add("transcend-candidate");
+    el.onclick = async () => {
+      if (transcendSelectMode) {
+        transcendSelectMode = false;
         const player = game.players[myPlayerId];
         const opponent = game.players[opponentId()];
         const builder = TRANSCEND_PARAM_BUILDERS[instance.defName];
-        const params = builder ? await builder({ player, opponent }) : {};
-        if (params === null) return; // 対象選択をキャンセル → 超越自体を中断
+        let params;
+        try {
+          params = builder ? await builder({ player, opponent }) : {};
+        } catch (err) {
+          alert(`対象選択中にエラーが発生しました: ${err.message}`);
+          render();
+          return;
+        }
+        if (params === null) {
+          render();
+          return; // 対象選択をキャンセル → 超越自体を中断
+        }
         try {
           game.useTranscend(myPlayerId, instance, params);
           await pushState();
@@ -682,12 +724,8 @@ function renderMonsterCard(ownerId, instance) {
           alert(err.message);
         }
         render();
-      };
-      el.appendChild(btn);
-    }
-    // 超越がまだ使えない状態の残りターン数は、左列の常設「超越」ボックスに
-    // プレイヤー単位で表示済みのため、モンスターごとには表示しない
-    el.onclick = () => {
+        return;
+      }
       selectedAttacker = selectedAttacker === instance ? null : instance;
       render();
     };
@@ -733,7 +771,14 @@ function renderBoard(role) {
         el.onclick = async () => {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[selectedHandCard.defName];
-          const params = builder ? await builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
+          let params;
+          try {
+            params = builder ? await builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
+          } catch (err) {
+            alert(`対象選択中にエラーが発生しました: ${err.message}`);
+            render();
+            return;
+          }
           if (params === null) {
             // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
             render();
@@ -831,7 +876,14 @@ function renderHand(role) {
         if (def?.type === "イベント") {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
+          let params;
+          try {
+            params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
+          } catch (err) {
+            alert(`対象選択中にエラーが発生しました: ${err.message}`);
+            render();
+            return;
+          }
           if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
           try {
             game.playEvent(myPlayerId, c.uid, params);
@@ -845,7 +897,14 @@ function renderHand(role) {
         if (def?.releaseRequirement) {
           const opponent = game.players[opponentId()];
           const builder = PARAM_BUILDERS[c.defName];
-          const params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
+          let params;
+          try {
+            params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
+          } catch (err) {
+            alert(`対象選択中にエラーが発生しました: ${err.message}`);
+            render();
+            return;
+          }
           if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
           try {
             game.summonFromHand(myPlayerId, c.uid, null, params);
@@ -1023,10 +1082,44 @@ function updateAttackFaceZone() {
     : null;
 }
 
+// 現在ターン中のプレイヤーの盤面(area-me / area-opponent)に色付き枠のハイライトを付ける。
+// render()の冒頭で必ず呼び出す。
+function updateActiveTurnHighlight() {
+  const activeIsMe = !!(game && game.gameStarted && !game.winner && game.activePlayerId === myPlayerId);
+  const activeIsOpponent = !!(game && game.gameStarted && !game.winner && game.activePlayerId === opponentId());
+  document.getElementById("area-me").classList.toggle("active-turn", activeIsMe);
+  document.getElementById("area-opponent").classList.toggle("active-turn", activeIsOpponent);
+}
+
+// 左列の「超越」ボックス(自分側)を、超越が使える状態のときだけクリック可能にする。
+// クリックすると「超越するモンスターを場から選ぶ」待機モードに入る(モンスター本体の
+// 超越ボタンは廃止し、この左列ボックス経由の選択方式に統一する)。
+// render()の冒頭で必ず呼び出す。
+function updateTranscendBox() {
+  const box = document.getElementById("transcend-box-me");
+  const isMyAction = !!(game && game.gameStarted && !game.winner && game.activePlayerId === myPlayerId);
+  const avail = isMyAction ? game.playerTranscendAvailability(myPlayerId) : { available: false };
+  box.classList.toggle("clickable-zone", !!avail.available);
+  box.classList.toggle("selecting", transcendSelectMode);
+  box.onclick = avail.available
+    ? () => {
+        transcendSelectMode = !transcendSelectMode;
+        selectedAttacker = null; // 超越選択中は「攻撃対象選択」と混同しないよう解除しておく
+        render();
+      }
+    : null;
+  if (!avail.available && transcendSelectMode) {
+    // 超越が使えなくなった(手番が変わった等)のに選択待ちのまま残らないようにする
+    transcendSelectMode = false;
+  }
+}
+
 function render() {
   updateEndGameButtons();
   updateTurnActionButton();
   updateAttackFaceZone();
+  updateActiveTurnHighlight();
+  updateTranscendBox();
 
   if (!game) {
     // 対戦相手のデッキがまだ揃っていない(部屋作成直後/参加直後)の待機状態
