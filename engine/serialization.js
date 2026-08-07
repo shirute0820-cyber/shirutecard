@@ -34,6 +34,8 @@ function serializeMonster(m) {
     attackRestrictionThisTurn: m.attackRestrictionThisTurn ?? null,
     canBeSpecialSummoned: m.canBeSpecialSummoned,
     onceEffectUsedThisTurn: m.onceEffectUsedThisTurn ?? {},
+    tempAtkThisTurn: m.tempAtkThisTurn ?? 0,
+    tempHpThisTurn: m.tempHpThisTurn ?? 0,
   };
 }
 
@@ -47,6 +49,8 @@ function deserializeMonster(o) {
     grantedKeywords: new Set(o.grantedKeywords ?? []),
     attackRestrictionThisTurn: o.attackRestrictionThisTurn ?? null,
     onceEffectUsedThisTurn: o.onceEffectUsedThisTurn ?? {},
+    tempAtkThisTurn: o.tempAtkThisTurn ?? 0,
+    tempHpThisTurn: o.tempHpThisTurn ?? 0,
   };
 }
 
