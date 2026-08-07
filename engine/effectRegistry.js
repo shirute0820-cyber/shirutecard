@@ -89,25 +89,40 @@ export const EFFECTS = {
       const target = params.targetMonster;
       if (!target || !player.board.includes(target)) throw new Error("対象の自分のモンスターを指定してください");
       target.currentAtk += 8;
-      // ターン終了時までの一時バフ。このシンプル実装では簡略化のため
-      // 「ターン終了時に元に戻す」処理は今後の拡張ポイントとする。
+      target.tempAtkThisTurn += 8; // ターン終了時まで(endTurn()で自動的に元へ戻る)
     },
   },
   ドラゴンの招集: {
-    onEvent({ player }) {
+    onEvent({ player, params }) {
       if (!player.board.some((m) => m && m.race === "ドラゴン")) {
         throw new Error("自分の場にドラゴン種がいないと発動できません");
       }
-      // 墓地から亜竜種2体をデッキへ(簡易実装: 名前ベースで2枚探す)
-      let moved = 0;
-      player.graveyard = player.graveyard.filter((n) => {
-        if (moved < 2 && CARD_DEF_RACE(n) === "亜竜") {
-          player.deck.push(n);
-          moved += 1;
-          return false;
+      const eligible = player.graveyard.filter((n) => CARD_DEF_RACE(n) === "亜竜");
+      if (eligible.length === 0) {
+        throw new Error("墓地に亜竜種がいないと発動できません");
+      }
+      let chosenNames;
+      if (params?.returnTargets && params.returnTargets.length > 0) {
+        chosenNames = [];
+        const pool = [...eligible];
+        for (const n of params.returnTargets.slice(0, 2)) {
+          const idx = pool.indexOf(n);
+          if (idx !== -1) {
+            chosenNames.push(n);
+            pool.splice(idx, 1);
+          }
         }
-        return true;
-      });
+      } else {
+        // 選択の余地がない(1体のみ)場合、または選択が渡されなかった場合は上から(最大2体)戻す
+        chosenNames = eligible.slice(0, 2);
+      }
+      for (const n of chosenNames) {
+        const idx = player.graveyard.indexOf(n);
+        if (idx !== -1) {
+          player.graveyard.splice(idx, 1);
+          player.deck.push(n);
+        }
+      }
     },
   },
   滝の試練: {
