@@ -60,12 +60,12 @@ main {
 }
 .mini-stats b { color: var(--accent2); }
 
-/* 盤面レイアウト: 左列(シールド/超越/ストレージ) - 中央(場/手札) -
-   イベントゾーン - 右列(除外/墓地) - デッキ(中央〜右をまたぐ) */
+/* 盤面レイアウト: 左列(シールド/HP/超越/ストレージ/除外) - 中央(場/手札) -
+   イベントゾーン - 右列(コスト/墓地) - デッキ(中央〜右をまたぐ) - ターン終了ボタン(自分側のみ) */
 .board-layout {
   display: grid;
   grid-template-columns: 92px 1fr 84px 84px;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   gap: 8px;
 }
 .left-col {
@@ -86,6 +86,8 @@ main {
   flex-wrap: wrap;
   gap: 6px;
   align-content: flex-start;
+  position: relative; /* 直接攻撃ヒント表示の基準位置にする */
+  min-height: 64px; /* 手札が少ない/0枚でも、場(カード1枚分)と同じくらいの高さを常に確保し、クリックしやすくする */
 }
 .event-zone-box {
   grid-column: 3;
@@ -98,6 +100,53 @@ main {
 .deck-zone-box {
   grid-column: 3 / 5;
   grid-row: 2;
+}
+/* 相手側は自分側と鏡写しにするため、場/手札(および付随するイベントゾーン・右列・デッキ)の行を入れ替える */
+.board-layout.mirrored .board-row { grid-row: 2; }
+.board-layout.mirrored .hand-row { grid-row: 1; }
+.board-layout.mirrored .event-zone-box { grid-row: 2; }
+.board-layout.mirrored .right-stack { grid-row: 2; }
+.board-layout.mirrored .deck-zone-box { grid-row: 1; }
+
+/* 手札ゾーンに攻撃対象としてのヒント表示を出す(モンスター選択中、相手の手札ゾーンをクリックで直接攻撃) */
+.hand-row.attack-target-hint {
+  outline: 2px dashed var(--danger);
+  outline-offset: 2px;
+  cursor: pointer;
+}
+.hand-row.attack-target-hint::after {
+  content: "プレイヤーへ直接攻撃";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(224, 101, 101, 0.15);
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* デッキの下に配置するターン終了ボタン(デッキと同程度の大きさ・見た目) */
+.turn-action-btn {
+  grid-column: 3 / 5;
+  grid-row: 3;
+  width: 100%;
+  min-height: 56px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.turn-action-btn:disabled {
+  background: #262b34;
+  color: var(--muted);
+  border-color: var(--border);
+  cursor: default;
 }
 
 .side-col {
@@ -132,6 +181,12 @@ main {
 .zone-box.shield-box .shield-value {
   color: #4fa3ff; /* シールドはプレイヤーへのダメージに直結するため、他の数字と違う青系で強調 */
 }
+.zone-box.hp-box .zone-value {
+  color: var(--good); /* HPは緑系で表示 */
+}
+.zone-box.cost-box .zone-value {
+  color: var(--accent); /* コストはカード上の表記と揃えてアクセントカラーで表示 */
+}
 .zone-box.transcend-box .zone-value {
   font-size: 12px;
   color: var(--accent);
@@ -149,6 +204,13 @@ main {
 }
 .event-zone-box {
   color: var(--accent2);
+}
+/* 除外:ほぼゲームに関与しないため、他ゾーンのような大きな枠は使わず、
+   墓地等と同様にクリックで中身を確認できる小さいテキストリンクとして表示する */
+.exile-mini-link {
+  font-size: 12px;
+  text-align: center;
+  padding: 2px 0;
 }
 
 .card {
