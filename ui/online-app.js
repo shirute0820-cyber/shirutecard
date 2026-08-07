@@ -417,7 +417,7 @@ async function pushState() {
 function enterGameScreen() {
   document.getElementById("setup-screen").style.display = "none";
   document.getElementById("game-screen").style.display = "block";
-  document.getElementById("my-role-label").textContent = "(先攻・後攻は抽選中...)";
+  document.getElementById("my-role-label").textContent = "(準備中...)";
   document.getElementById("me-label").textContent = `自分(${myPlayerId})`;
   document.getElementById("opponent-label").textContent = `相手(${opponentId()})`;
   render();
