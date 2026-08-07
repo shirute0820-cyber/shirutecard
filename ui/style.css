@@ -35,6 +35,34 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 header .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
 #turn-info { font-size: 13px; color: var(--accent2); }
 
+/* 「ゲームを終了する」はターン終了ボタンと間違えて押されないよう、中央から離した右上に配置する */
+#header-end-game-controls {
+  display: flex;
+  gap: 6px;
+}
+#header-end-game-controls button {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+#header-end-game-controls button:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+#header-end-game-controls #btn-end-game-confirm {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+#header-end-game-controls #btn-end-game-confirm:hover {
+  opacity: 0.85;
+  color: #fff;
+}
+
 main {
   display: flex;
   flex-direction: column;
@@ -45,11 +73,27 @@ main {
 
 .player-area {
   background: var(--panel);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   border-radius: 8px;
   padding: 10px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .player-area h2 { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+
+/* 現在ターン中のプレイヤーの盤面を色付きの枠線でわかりやすくする */
+.player-area.active-turn {
+  border-color: var(--good);
+  box-shadow: 0 0 0 1px var(--good);
+}
+.player-area.active-turn h2 {
+  color: var(--good);
+}
+.player-area.active-turn h2::after {
+  content: "● 手番";
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
 
 .mini-stats {
   display: flex;
@@ -195,6 +239,11 @@ main {
   color: var(--good);
   font-weight: 700;
 }
+.zone-box.transcend-box.selecting {
+  border-color: var(--good);
+  box-shadow: 0 0 0 1px var(--good);
+  background: rgba(111, 191, 115, 0.12);
+}
 .zone-box.clickable-zone {
   cursor: pointer;
   transition: border-color 0.1s;
@@ -251,6 +300,11 @@ main {
 .card .keywords { color: var(--accent); font-size: 11px; }
 .card.event { border-color: var(--accent2); }
 .card.sick { opacity: 0.55; }
+/* 超越の選択待ちモード中、対象になりうる自分のモンスターを目立たせる */
+.card.transcend-candidate {
+  border-color: var(--good);
+  box-shadow: 0 0 0 1px var(--good);
+}
 
 /* カード効果のホバーツールチップ(偉人カードゲームと同様の仕様) */
 .card-effect-tooltip {
@@ -276,16 +330,6 @@ main {
 }
 .card:hover .card-effect-tooltip {
   opacity: 1;
-}
-.card button.tr-btn {
-  margin-top: 4px;
-  font-size: 11px;
-  background: var(--accent);
-  border: none;
-  border-radius: 4px;
-  color: #1a1a1a;
-  padding: 2px 4px;
-  cursor: pointer;
 }
 
 .controls {
