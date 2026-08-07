@@ -237,8 +237,10 @@ export const EFFECTS = {
   },
   オルレアホワイト・ドラゴン: {
     onOwnEndPhase({ game, opponent, instance }) {
+      // 正: 敵モンスターの現在HPが「このカードの現在の攻撃力(超越等の増加分も含む)」より
+      // 低いものをすべて破壊する(誤って自身のHPと比較していたバグを修正)
       for (const m of [...opponent.board]) {
-        if (m && m.currentHp < instance.currentHp) {
+        if (m && m.currentHp < instance.currentAtk) {
           game.destroyMonster(opponent, m);
         }
       }
@@ -300,9 +302,25 @@ export const EFFECTS = {
     },
   },
   エンダーリコリス・ワイバーン: {
-    onSummon({ game, player }) {
-      const graveWyverns = player.graveyard.filter((n) => CARD_DEF_RACE(n) === "亜竜").slice(0, 2);
-      for (const n of graveWyverns) {
+    onSummon({ game, player, params }) {
+      const eligible = player.graveyard.filter((n) => CARD_DEF_RACE(n) === "亜竜");
+      let chosen;
+      if (params?.reviveTargets && params.reviveTargets.length > 0) {
+        // UI側で選択された対象を優先する(存在確認しつつ、同名重複も1体ずつ正しく消費する)
+        chosen = [];
+        const pool = [...eligible];
+        for (const n of params.reviveTargets.slice(0, 2)) {
+          const idx = pool.indexOf(n);
+          if (idx !== -1) {
+            chosen.push(n);
+            pool.splice(idx, 1);
+          }
+        }
+      } else {
+        // 選択の余地がない(2体以下)場合、または選択が渡されなかった場合は全て(最大2体)蘇生する
+        chosen = eligible.slice(0, 2);
+      }
+      for (const n of chosen) {
         const slot = game.findEmptySlot(player);
         if (slot === -1) break;
         player.graveyard.splice(player.graveyard.indexOf(n), 1);
