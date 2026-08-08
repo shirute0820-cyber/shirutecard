@@ -328,9 +328,8 @@ export const EFFECTS = {
     // hydrateGame()を挟んでも正しく継続する(onTranscend側でクロージャを予約する方式だと消えてしまうため採用しない)
     onOwnEndPhase({ game, player, opponent, instance }) {
       if (!instance.transcended) return;
-      opponent.hp -= 20;
+      game.dealDamageToPlayer(opponent, 20);
       game.log(`${player.id}: ダリアバーミリオン・ドラゴンの超越効果で相手に20ダメージ`);
-      game.checkWinCondition();
     },
   },
   デルフィニウムアズール・ドラゴン: {
@@ -400,9 +399,8 @@ export const EFFECTS = {
       // ≪超越≫したターンから有効になる、①とは別枠の効果:
       // 敵を破壊したとき、相手に8ダメージを与える(①の1ターン1度制限を消費しない)
       if (instance.transcended) {
-        opponent.hp -= 8;
+        game.dealDamageToPlayer(opponent, 8);
         game.log(`${player.id}: ドラゴニュート・キングの超越効果で相手に8ダメージ`);
-        game.checkWinCondition();
       }
     },
   },
