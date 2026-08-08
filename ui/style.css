@@ -306,6 +306,28 @@ main {
   box-shadow: 0 0 0 1px var(--good);
 }
 
+/* リリース召喚の対象として選択可能なモンスター(クリック/ドラッグ&ドロップ共通) */
+.card.release-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  cursor: pointer;
+}
+
+/* ドラッグ中の手札を、ドロップ可能な場所の上に重ねたときのハイライト */
+.card.drag-target,
+.zone-box.drag-target {
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 2px var(--accent2);
+}
+
+/* ドラッグ可能な手札カードは、つかめることが分かるカーソルにする */
+.card[draggable="true"] {
+  cursor: grab;
+}
+.card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 /* カード効果のホバーツールチップ(偉人カードゲームと同様の仕様) */
 .card-effect-tooltip {
   position: absolute;
@@ -442,6 +464,88 @@ main {
 }
 #picker-modal-list button.picker-item:hover {
   border-color: var(--accent2);
+}
+
+/* ルール説明モーダル。長文になるため、本文だけがスクロールし、
+   閉じるボタンを含むヘッダーは常に左上に表示され続けるようにする */
+#rules-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#rules-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(560px, 92vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#rules-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--panel);
+}
+#rules-modal-header button {
+  background: var(--accent);
+  border: none;
+  color: #1a1a1a;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#rules-modal-header .rules-modal-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+#rules-modal-content {
+  padding: 4px 16px 18px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.7;
+}
+#rules-modal-content h3 {
+  font-size: 14px;
+  margin: 18px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid #22262e;
+  color: var(--accent2);
+}
+#rules-modal-content h3:first-child { margin-top: 10px; padding-top: 0; border-top: none; }
+#rules-modal-content p { margin: 6px 0; }
+#rules-modal-content ul, #rules-modal-content ol { margin: 6px 0; padding-left: 20px; }
+#rules-modal-content li { margin: 3px 0; }
+#rules-modal-content table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px; }
+#rules-modal-content th, #rules-modal-content td {
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+#rules-modal-content th { background: #262b34; }
+#rules-modal-content strong { color: var(--accent); }
+
+/* ホーム画面・対戦画面それぞれに置く「ルール」ボタン */
+.btn-open-rules {
+  background: var(--accent2);
+  border: none;
+  color: #1a1a1a;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
 }
 
 /* ==========================================================
