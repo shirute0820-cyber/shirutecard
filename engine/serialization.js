@@ -148,6 +148,9 @@ export function serializeGame(game) {
     dragonKilledThisTurnByCombat: game.dragonKilledThisTurnByCombat,
     gameStarted: game.gameStarted,
     mulliganDone: game.mulliganDone ?? { p1: false, p2: false },
+    // 演出・効果音用のイベントログ。この書き込みが発生させた分だけを乗せる
+    // (受け取った側は、これを見て「何が起きたか」を再現し、その後クリアする)
+    uiEvents: game.uiEvents ?? [],
     // 予約された遅延効果(関数)はそのままでは保存できないため、
     // 「未実行の遅延効果がある」ことだけ保持し、実際の関数はホスト側の
     // メモリにある間だけ有効とする(オンライン対戦での既知の簡略化ポイント)。
@@ -177,6 +180,10 @@ export function hydrateGame(snapshot, { log = () => {} } = {}) {
   game.gameStarted = !!snapshot.gameStarted;
   game.mulliganDone = snapshot.mulliganDone ?? { p1: false, p2: false };
   game.pendingEndPhaseEffects = { p1: [], p2: [] }; // 遅延効果の関数自体は復元不可(下記の注意点を参照)
+  // このスナップショットが運んできた演出・効果音用イベント。受け取り側のrender()が
+  // 読み取って再現し、その後クリアする(自分自身の書き込みのエコーはonValue側で
+  // 既にフィルタされているため、二重に演出が出ることはない)
+  game.uiEvents = snapshot.uiEvents ?? [];
 
   return game;
 }
