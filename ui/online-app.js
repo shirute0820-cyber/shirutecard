@@ -2,6 +2,7 @@ import { GameState } from "../engine/GameState.js";
 import { KEYWORDS, CONFIG } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { serializeGame, hydrateGame } from "../engine/serialization.js";
+import { flushUiEvents } from "./fx.js";
 import {
   DECK_SIZE,
   copyLimitOf,
@@ -777,6 +778,7 @@ function costHtml(cost) {
 function renderMonsterCard(ownerId, instance) {
   const el = document.createElement("div");
   el.className = "card";
+  el.dataset.slot = String(game.players[ownerId].board.indexOf(instance));
   const kws = [...keywordSet(instance)];
   const sick =
     instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
@@ -891,6 +893,7 @@ function renderBoard(role) {
       container.appendChild(renderMonsterCard(ownerId, m));
     } else {
       const el = renderEmptySlot();
+      el.dataset.slot = String(slot);
       if (role === "me" && isMyAction && selectedHandCard && selectedHandCard.type === "モンスター") {
         el.classList.remove("empty-slot");
         el.textContent = "ここに召喚";
@@ -1050,6 +1053,23 @@ function renderHand(role) {
 }
 
 const ZONE_LABELS = { deck: "デッキ", storage: "ストレージ", graveyard: "墓地", exile: "除外" };
+
+// ==========================================================
+// 演出・効果音: game.uiEvents を読み取る際に使う要素解決ヘルパー
+// (このファイルはowner playerIdではなく role="me"|"opponent" でDOM要素を
+//  持っているため、ownerIdからroleへ変換してから探す)
+// ==========================================================
+function roleOf(ownerId) {
+  return ownerId === myPlayerId ? "me" : "opponent";
+}
+function getMonsterSlotEl(ownerId, slot) {
+  const container = document.getElementById(`board-${roleOf(ownerId)}`);
+  if (!container) return null;
+  return container.querySelector(`[data-slot="${slot}"]`);
+}
+function getPlayerStatsEl(playerId) {
+  return document.getElementById(`hp-value-${roleOf(playerId)}`);
+}
 
 function openZoneModal(playerId, zoneKey) {
   const player = game.players[playerId];
@@ -1241,6 +1261,11 @@ function updateTranscendBox() {
 }
 
 function render() {
+  renderInner();
+  if (game) flushUiEvents(game, { getMonsterSlotEl, getPlayerStatsEl });
+}
+
+function renderInner() {
   updateEndGameButtons();
   updateTurnActionButton();
   updateAttackFaceZone();
