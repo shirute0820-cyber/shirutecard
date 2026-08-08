@@ -150,6 +150,11 @@
     font-weight: 700;
   }
   .deck-card .qty-row button:disabled { opacity: 0.3; cursor: not-allowed; }
+  /* コスト帯・カード種別による枠色(対戦画面のカードと統一)。テーマ色(.theme-赤)を優先したい場合はそちらを後に書く */
+  .deck-card.event { border-color: var(--tier-event); }
+  .deck-card.tier-low { border-color: var(--tier-low); }
+  .deck-card.tier-mid { border-color: var(--tier-mid); }
+  .deck-card.tier-high { border-color: var(--tier-high); box-shadow: 0 0 6px rgba(251, 191, 36, 0.35); }
   .deck-card.theme-赤 { border-color: #7a3b2e; }
   .deck-card .cost-num { color: var(--accent); font-weight: 800; font-size: 1.25em; }
   .deck-card:hover .card-effect-tooltip { opacity: 1; }
