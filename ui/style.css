@@ -443,3 +443,81 @@ main {
 #picker-modal-list button.picker-item:hover {
   border-color: var(--accent2);
 }
+
+/* ==========================================================
+   演出・効果音まわり(カード破壊・ダメージ・回復・召喚・ドロー)
+   JS側(app.js / online-app.js)のprocessUiEvents()から生成される。
+   ========================================================== */
+
+/* モンスターが破壊された瞬間、その枠に一瞬重ねて表示する演出。
+   派手めに: 赤い閃光→カード名がひび割れるように拡大しながらフェードアウト */
+.destroy-fx {
+  position: fixed;
+  pointer-events: none;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  animation: destroy-flash 0.6s ease-out forwards;
+}
+.destroy-fx-label {
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(224, 101, 101, 0.92);
+  padding: 4px 10px;
+  border-radius: 6px;
+  box-shadow: 0 0 18px 4px rgba(224, 101, 101, 0.85);
+  animation: destroy-label 0.6s ease-out forwards;
+  white-space: nowrap;
+}
+@keyframes destroy-flash {
+  0% { background: rgba(224, 101, 101, 0.55); box-shadow: 0 0 0 0 rgba(224,101,101,0.9); }
+  15% { background: rgba(224, 101, 101, 0.28); box-shadow: 0 0 24px 10px rgba(224,101,101,0.6); }
+  100% { background: rgba(224, 101, 101, 0); box-shadow: 0 0 0 0 rgba(224,101,101,0); }
+}
+@keyframes destroy-label {
+  0% { transform: scale(0.7) rotate(-2deg); opacity: 0; }
+  20% { transform: scale(1.15) rotate(1deg); opacity: 1; }
+  70% { transform: scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1.3) rotate(0deg); opacity: 0; }
+}
+
+/* まだ場に残っているモンスターがダメージを受けたときの、控えめな一瞬の赤フラッシュ */
+.card.hit-flash {
+  animation: hit-flash-anim 0.3s ease-out;
+}
+@keyframes hit-flash-anim {
+  0% { box-shadow: 0 0 0 2px rgba(224, 101, 101, 0.9) inset; }
+  100% { box-shadow: 0 0 0 0 rgba(224, 101, 101, 0) inset; }
+}
+
+/* 召喚された瞬間、控えめにポップインする演出 */
+.card.summon-pop {
+  animation: summon-pop-anim 0.35s ease-out;
+}
+@keyframes summon-pop-anim {
+  0% { transform: scale(0.85); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ダメージ・回復の数値ポップアップ(控えめ) */
+.floating-fx {
+  position: fixed;
+  pointer-events: none;
+  z-index: 500;
+  font-weight: 700;
+  font-size: 13px;
+  transform: translate(-50%, 0);
+  animation: float-up 0.9s ease-out forwards;
+  white-space: nowrap;
+}
+.floating-fx.dmg-text { color: #ff8a8a; text-shadow: 0 0 4px rgba(0,0,0,0.6); }
+.floating-fx.dmg-text-big { color: #ff8a8a; font-size: 18px; text-shadow: 0 0 6px rgba(0,0,0,0.7); }
+.floating-fx.heal-text { color: #8fe0a0; font-size: 15px; text-shadow: 0 0 5px rgba(0,0,0,0.7); }
+@keyframes float-up {
+  0% { opacity: 0; transform: translate(-50%, 4px) scale(0.9); }
+  15% { opacity: 1; transform: translate(-50%, -6px) scale(1.05); }
+  100% { opacity: 0; transform: translate(-50%, -34px) scale(1); }
+}
