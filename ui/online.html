@@ -158,7 +158,10 @@
 </head>
 <body>
   <div id="setup-screen">
-    <p id="app-version-label" style="font-size:11px;color:var(--muted);text-align:right;margin:0 0 8px;">Ver. -</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <button class="btn-open-rules">ルール</button>
+      <p id="app-version-label" style="font-size:11px;color:var(--muted);margin:0;">Ver. -</p>
+    </div>
     <h2>1. Firebase設定を貼り付けて接続</h2>
     <p style="font-size:12px;color:var(--muted);">Firebaseコンソールの「プロジェクトの設定」→「全般」→「マイアプリ」にある firebaseConfig オブジェクトをそのまま貼り付けてください(前回の対戦ツールと同様、毎回手動で入力する想定です)。</p>
     <textarea id="firebase-config-input" placeholder='{ "apiKey": "...", "authDomain": "...", "databaseURL": "...", "projectId": "..." }'></textarea>
@@ -207,6 +210,7 @@
       <h1>カードゲーム オンライン対戦 <span class="sub" id="my-role-label"></span></h1>
       <div id="turn-info"></div>
       <div id="header-end-game-controls">
+        <button class="btn-open-rules">ルール</button>
         <button id="btn-end-game">ゲームを終了する</button>
         <button id="btn-end-game-confirm" style="display:none;">本当に終了する(部屋のデータを削除します)</button>
       </div>
@@ -237,7 +241,7 @@
             <div class="zone-link exile-mini-link" id="exile-zone-opponent">除外 <span id="exile-count-opponent">0</span></div>
           </div>
           <div class="board-row" id="board-opponent"></div>
-          <div class="zone-box event-zone-box">
+          <div class="zone-box event-zone-box" id="event-zone-opponent">
             <div class="zone-label">イベント<br />ゾーン</div>
           </div>
           <div class="side-col right-stack">
@@ -288,7 +292,7 @@
             <div class="zone-link exile-mini-link" id="exile-zone-me">除外 <span id="exile-count-me">0</span></div>
           </div>
           <div class="board-row" id="board-me"></div>
-          <div class="zone-box event-zone-box">
+          <div class="zone-box event-zone-box" id="event-zone-me">
             <div class="zone-label">イベント<br />ゾーン</div>
           </div>
           <div class="side-col right-stack">
@@ -335,6 +339,16 @@
         <button id="picker-modal-cancel">キャンセル</button>
       </div>
       <div id="picker-modal-list"></div>
+    </div>
+  </div>
+
+  <div id="rules-modal-overlay" style="display:none;">
+    <div id="rules-modal">
+      <div id="rules-modal-header">
+        <button id="btn-close-rules">✕ 閉じる</button>
+        <span class="rules-modal-title">ルール説明</span>
+      </div>
+      <div id="rules-modal-content"></div>
     </div>
   </div>
 
