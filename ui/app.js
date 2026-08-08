@@ -89,6 +89,40 @@ export async function pickHandCard(candidates, label) {
   if (candidates.length === 1) return candidates[0];
   return pickFromList(candidates, label, (c) => c.defName);
 }
+// デッキ・ストレージ等、defName(文字列)の一覧から1枚を選ばせる用(滝の試練 等)。
+// 同名カードは1つにまとめて表示する(どの物理的な1枚を選んでも結果は同じため)。
+async function pickCardName(names, label) {
+  const unique = [...new Set(names)];
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0];
+  return pickFromList(unique, label, (n) => n);
+}
+// 場・手札から「亜竜種を合計2体」選ばせる用(デスラトル)。
+async function pickSacrifices(player, max, label) {
+  const boardPool = player.board.filter((m) => m && m.race === "亜竜").map((m) => ({ from: "board", ref: m, label: `[場] ${m.defName}` }));
+  const handPool = player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "亜竜").map((c) => ({ from: "hand", ref: c, label: `[手札] ${c.defName}` }));
+  const pool = [...boardPool, ...handPool];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体)`, (p) => p.label);
+    if (pick === CANCELLED) return CANCELLED;
+    chosen.push({ from: pick.from, ref: pick.ref });
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
+}
+// モンスターインスタンスをちょうどmax体選ばせる用(デスラトルの対象選択等)
+async function pickMonstersUpTo(candidates, max, label) {
+  const pool = [...candidates];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体)`, (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`);
+    if (pick === CANCELLED) return CANCELLED;
+    chosen.push(pick);
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
+}
 
 // PARAM_BUILDERSは、キャンセルされたらnullを返す(=カード発動自体を中断する合図)。
 // それ以外は通常通りparamsオブジェクトを返す。すべて非同期(モーダル待ち)。
@@ -117,9 +151,19 @@ const PARAM_BUILDERS = {
     return { discardHandUid: c?.uid };
   },
   滝の試練: async ({ player, selfUid }) => {
-    const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
-    if (c === CANCELLED) return null;
-    return { discardHandUid: c?.uid };
+    const discard = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
+    if (discard === CANCELLED) return null;
+    if (!discard) return null;
+    const deckDragons = player.deck.filter((n) => CARD_DEFS[n]?.race === "ドラゴン");
+    const useDeck = deckDragons.length > 0;
+    const pool = useDeck ? deckDragons : player.storage.filter((n) => CARD_DEFS[n]?.race === "ドラゴン");
+    if (pool.length === 0) {
+      alert("デッキ・ストレージにドラゴン種が見つかりません");
+      return null;
+    }
+    const fetchName = await pickCardName(pool, `${useDeck ? "デッキ" : "ストレージ"}から手札に加えるドラゴン種`);
+    if (fetchName === CANCELLED || !fetchName) return null;
+    return { discardHandUid: discard.uid, fetchDefName: fetchName };
   },
   リバーススケイル: async ({ player }) => {
     const t = await pickMonster(
@@ -128,6 +172,23 @@ const PARAM_BUILDERS = {
     );
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+  デスラトル: async ({ player, opponent }) => {
+    const sacrifices = await pickSacrifices(player, 2, "墓地へ送る亜竜種を選択");
+    if (sacrifices === CANCELLED) return null;
+    if (sacrifices.length !== 2) {
+      alert("自分の場・手札に、墓地へ送れる亜竜種が合計2体必要です");
+      return null;
+    }
+    const board = opponent.board.filter(Boolean);
+    let targets;
+    if (board.length <= 2) {
+      targets = board;
+    } else {
+      targets = await pickMonstersUpTo(board, 2, "16ダメージを与える敵モンスター");
+      if (targets === CANCELLED) return null;
+    }
+    return { sacrifices, targetMonsters: targets };
   },
 };
 
@@ -147,6 +208,22 @@ const TRANSCEND_PARAM_BUILDERS = {
     );
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+};
+
+// 「1ターンに1度発動可能」等の起動効果(onActivate)用の対象選択ビルダー
+const ACTIVATE_PARAM_BUILDERS = {
+  オルレアホワイト・ドラゴン: async ({ player }) => {
+    const c = await pickHandCard(
+      player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"),
+      "除外するドラゴン種の手札"
+    );
+    if (c === CANCELLED) return null;
+    if (!c) {
+      alert("除外できるドラゴン種の手札がありません");
+      return null;
+    }
+    return { exileHandUid: c.uid };
   },
 };
 
@@ -187,6 +264,29 @@ function renderMonsterCard(playerId, instance, slot) {
   `;
 
   if (playerId === game.activePlayerId && !game.winner) {
+    if (game.canActivateAbility(playerId, instance)) {
+      const abilityBtn = document.createElement("button");
+      abilityBtn.className = "tr-btn";
+      abilityBtn.textContent = "起動効果を使う";
+      abilityBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const player = game.players[playerId];
+        const opponent = game.players[game.opponentOf(playerId)];
+        const builder = ACTIVATE_PARAM_BUILDERS[instance.defName];
+        const params = builder ? await builder({ player, opponent }) : {};
+        if (params === null) {
+          render();
+          return;
+        }
+        try {
+          game.activateAbility(playerId, instance, params);
+        } catch (err) {
+          alert(err.message);
+        }
+        render();
+      };
+      el.appendChild(abilityBtn);
+    }
     const trStatus = game.transcendStatus(playerId, instance);
     if (trStatus.available) {
       const btn = document.createElement("button");
