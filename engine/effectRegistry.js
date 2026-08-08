@@ -6,7 +6,10 @@ import { KEYWORDS } from "./constants.js";
 // onLeaveField({game, player, instance})        … 場を離れたとき(墓地送りになった直後)
 // onEvent({game, player, opponent, params})     … イベントカード発動時
 // onOwnEndPhase({game, player, instance})       … 自分のエンドフェイズ時、場にいる限り毎ターン判定
-// onKillInCombat({game, player, instance})      … このカードが攻撃側として敵を戦闘で破壊したとき
+// onKillInCombat({game, player, opponent, instance}) … このカードが攻撃側として敵を戦闘で破壊したとき
+// onActivate({game, player, opponent, instance, params}) … 「1ターンに1度発動可能」等の起動効果
+//   (summonedOnTurn/超越/イベントに紐付かない、プレイヤーが任意タイミングで発動するモンスター効果。
+//    1体につき1つを想定し、onceEffectUsedThisTurn.ability で毎ターン自動リセットされる)
 //
 // 新しいカードを追加するときは、ここに1エントリ足すだけでよく、
 // GameState.js 本体を書き換える必要はない。
@@ -132,17 +135,25 @@ export const EFFECTS = {
       player.hand.splice(player.hand.indexOf(discard), 1);
       player.graveyard.push(discard.defName);
 
-      const fromDeckIdx = player.deck.findIndex((n) => CARD_DEF_RACE(n) === "ドラゴン");
+      // どのドラゴン種を加えるかはプレイヤーが選ぶ(UI側のPARAM_BUILDERSで候補を
+      // 提示し、選ばれた名前をfetchDefNameとして受け取る。デッキ優先・ストレージは
+      // デッキに無い場合のみ参照)
+      const chosenName = params.fetchDefName;
+      if (!chosenName) throw new Error("デッキ・ストレージから手札に加えるドラゴン種を指定してください");
+
+      const fromDeckIdx = player.deck.indexOf(chosenName);
       if (fromDeckIdx !== -1) {
-        const [n] = player.deck.splice(fromDeckIdx, 1);
-        player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: n, hold: false });
+        player.deck.splice(fromDeckIdx, 1);
+        player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: chosenName, hold: false });
         return;
       }
-      const fromStorageIdx = player.storage.findIndex((n) => CARD_DEF_RACE(n) === "ドラゴン");
+      const fromStorageIdx = player.storage.indexOf(chosenName);
       if (fromStorageIdx !== -1) {
-        const [n] = player.storage.splice(fromStorageIdx, 1);
-        player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: n, hold: false });
+        player.storage.splice(fromStorageIdx, 1);
+        player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: chosenName, hold: false });
+        return;
       }
+      throw new Error("指定されたカードがデッキ・ストレージに見つかりません");
     },
   },
   エッグ・シーフ: {
@@ -230,11 +241,16 @@ export const EFFECTS = {
   },
   デスラトル: {
     onEvent({ game, player, opponent, params }) {
-      const sources = [...player.board.filter(Boolean), ...player.hand].filter((c) =>
-        c.race === "亜竜" || CARD_DEF_RACE(c.defName) === "亜竜"
-      );
       const chosen = params.sacrifices; // [{from:'board'|'hand', ref}] を2つ渡す想定
       if (!chosen || chosen.length !== 2) throw new Error("場・手札から亜竜種2体を指定してください");
+
+      // 相手の場にモンスターが0体なら、そもそも発動できない(コストだけ支払わされることを防ぐため
+      // 対象確認はコスト消費より先に行う)
+      const targets = params.targetMonsters ?? opponent.board.filter(Boolean).slice(0, 2);
+      if (targets.length === 0) {
+        throw new Error("相手の場にモンスターが存在しないため発動できません");
+      }
+
       for (const c of chosen) {
         if (c.from === "board") {
           game.sendToGraveyard(player, c.ref);
@@ -246,11 +262,24 @@ export const EFFECTS = {
           }
         }
       }
-      const targets = params.targetMonsters ?? opponent.board.filter(Boolean).slice(0, 2);
       for (const t of targets) game.dealDamageToMonster(opponent, t, 16);
     },
   },
   オルレアホワイト・ドラゴン: {
+    // ②1ターンに1度発動可能。手札からドラゴン種1体を除外する。
+    // ターン終了時まで攻撃力が、除外したモンスターの攻撃力分アップする。
+    onActivate({ game, player, instance, params }) {
+      const card = player.hand.find((c) => c.uid === params.exileHandUid);
+      if (!card) throw new Error("除外する手札のドラゴン種を指定してください");
+      if (CARD_DEF_RACE(card.defName) !== "ドラゴン") throw new Error("ドラゴン種の手札を指定してください");
+      const idx = player.hand.indexOf(card);
+      player.hand.splice(idx, 1);
+      player.exile.push(card.defName);
+      const buffAmount = CARD_DEFS[card.defName]?.atk ?? 0;
+      instance.currentAtk += buffAmount;
+      instance.tempAtkThisTurn += buffAmount; // ターン終了時まで(endTurn()で自動的に元へ戻る)
+      game.log(`${player.id}: オルレアホワイト・ドラゴンが『${card.defName}』を除外し、攻撃力+${buffAmount}(ターン終了時まで)`);
+    },
     onOwnEndPhase({ game, opponent, instance }) {
       // 正: 敵モンスターの現在HPが「このカードの現在の攻撃力(超越等の増加分も含む)」より
       // 低いものをすべて破壊する(誤って自身のHPと比較していたバグを修正)
@@ -273,11 +302,14 @@ export const EFFECTS = {
       });
     },
     onTranscend({ game, player }) {
-      const migi = player.board.find((m) => m && m.defName === "ゴ・ド・リックの右腕");
-      if (!migi) return;
-      migi.currentAtk += 8;
-      migi.currentHp += 4;
-      migi.grantedKeywords.add(KEYWORDS.TOTSUGEKI);
+      // 説明文の「自分の場にいるすべての『ゴ・ド・リックの右腕』」に対応するため、
+      // 1体だけでなく該当する全コピーを対象にする
+      const migis = player.board.filter((m) => m && m.defName === "ゴ・ド・リックの右腕");
+      for (const migi of migis) {
+        migi.currentAtk += 8;
+        migi.currentHp += 4;
+        migi.grantedKeywords.add(KEYWORDS.TOTSUGEKI);
+      }
     },
     onLeaveField({ game, player }) {
       const migi = player.board.find((m) => m && m.defName === "ゴ・ド・リックの右腕");
@@ -290,12 +322,15 @@ export const EFFECTS = {
       if (target) game.dealDamageToMonster(opponent, target, 24);
       game.grantKeywordToOwnRaces(player, ["亜竜"], KEYWORDS.SOKKOU);
     },
-    onTranscend({ game, player, opponent }) {
-      game.queueEndPhaseEffect(player.id, () => {
-        opponent.hp -= 20;
-        game.log(`${player.id}: ダリアバーミリオン・ドラゴンの超越効果で相手に20ダメージ`);
-        game.checkWinCondition();
-      });
+    // 「超越したターンから、この効果は有効となる。自分のエンドフェイズ時、相手プレイヤーに
+    // 20ダメージ与える」= 超越した以降、毎エンドフェイズ継続的に発動する(1回きりではない)。
+    // instance.transcended はシリアライズ対象の通常フィールドなので、オンライン対戦での
+    // hydrateGame()を挟んでも正しく継続する(onTranscend側でクロージャを予約する方式だと消えてしまうため採用しない)
+    onOwnEndPhase({ game, player, opponent, instance }) {
+      if (!instance.transcended) return;
+      opponent.hp -= 20;
+      game.log(`${player.id}: ダリアバーミリオン・ドラゴンの超越効果で相手に20ダメージ`);
+      game.checkWinCondition();
     },
   },
   デルフィニウムアズール・ドラゴン: {
@@ -310,10 +345,10 @@ export const EFFECTS = {
         }
       }
     },
-    onTranscend({ game, player }) {
-      game.queueEndPhaseEffect(player.id, () => {
-        game.healPlayer(player, 24);
-      });
+    // ダリアバーミリオン・ドラゴンと同様、超越した以降は毎エンドフェイズ継続的に発動する
+    onOwnEndPhase({ game, player, instance }) {
+      if (!instance.transcended) return;
+      game.healPlayer(player, 24);
     },
   },
   エンダーリコリス・ワイバーン: {
@@ -355,11 +390,20 @@ export const EFFECTS = {
         player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: n, hold: false });
       }
     },
-    onKillInCombat({ game, player, instance }) {
-      if (instance.onceEffectUsedThisTurn.dragonyuteKing) return;
-      instance.onceEffectUsedThisTurn.dragonyuteKing = true;
-      instance.hasAttackedThisTurn = false;
-      game.log(`${player.id}: ドラゴニュート・キングが撃破ボーナスでもう一度攻撃可能に`);
+    onKillInCombat({ game, player, opponent, instance }) {
+      // ①1ターンに1度、敵を破壊したとき、もう一度攻撃できるようになる
+      if (!instance.onceEffectUsedThisTurn.dragonyuteKing) {
+        instance.onceEffectUsedThisTurn.dragonyuteKing = true;
+        instance.hasAttackedThisTurn = false;
+        game.log(`${player.id}: ドラゴニュート・キングが撃破ボーナスでもう一度攻撃可能に`);
+      }
+      // ≪超越≫したターンから有効になる、①とは別枠の効果:
+      // 敵を破壊したとき、相手に8ダメージを与える(①の1ターン1度制限を消費しない)
+      if (instance.transcended) {
+        opponent.hp -= 8;
+        game.log(`${player.id}: ドラゴニュート・キングの超越効果で相手に8ダメージ`);
+        game.checkWinCondition();
+      }
     },
   },
 };
