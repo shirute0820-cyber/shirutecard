@@ -137,7 +137,7 @@ function renderDeckBuilder() {
     const n = deckBuilderDraft[def.name] ?? 0;
     const limit = copyLimitOf(def.name);
     const el = document.createElement("div");
-    el.className = `deck-card theme-${def.theme ?? ""}`;
+    el.className = `deck-card theme-${def.theme ?? ""} ${cardTierClass(def)}`;
     el.innerHTML = `
       <div class="name">${def.name}</div>
       <div class="meta">コスト${costHtml(def.cost)} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
@@ -847,12 +847,23 @@ function costHtml(cost) {
   return `<span class="cost-num">${cost ?? "?"}</span>`;
 }
 
+// カードの枠色クラス判定(イベント/1〜3コスト/4〜7コスト/8,9コスト)
+function cardTierClass(def) {
+  if (!def) return "";
+  if (def.type === "イベント") return "event";
+  const cost = def.cost;
+  if (cost == null) return "";
+  if (cost <= 3) return "tier-low";
+  if (cost <= 7) return "tier-mid";
+  return "tier-high";
+}
+
 // ==========================================================
 // レンダリング(自分視点/相手視点)
 // ==========================================================
 function renderMonsterCard(ownerId, instance) {
   const el = document.createElement("div");
-  el.className = "card";
+  el.className = "card " + cardTierClass(CARD_DEFS[instance.defName]);
   const slot = game.players[ownerId].board.indexOf(instance);
   el.dataset.slot = String(slot);
   const kws = [...keywordSet(instance)];
@@ -1072,7 +1083,7 @@ function renderHand(role) {
     for (const c of player.hand) {
       const def = CARD_DEFS[c.defName];
       const el = document.createElement("div");
-      el.className = "card";
+      el.className = "card " + cardTierClass(def);
       const marked = mulliganReturn.has(c.uid);
       if (marked) el.classList.add("selected");
       el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
@@ -1095,7 +1106,7 @@ function renderHand(role) {
     for (const c of keepSelection.nonHold) {
       const def = CARD_DEFS[c.defName];
       const el = document.createElement("div");
-      el.className = "card";
+      el.className = "card " + cardTierClass(def);
       const chosen = keepSelection.chosenUid === c.uid;
       if (chosen) el.classList.add("selected");
       el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
@@ -1118,7 +1129,7 @@ function renderHand(role) {
   for (const c of player.hand) {
     const def = CARD_DEFS[c.defName];
     const el = document.createElement("div");
-    el.className = "card" + (def?.type === "イベント" ? " event" : "");
+    el.className = "card " + cardTierClass(def);
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
     el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
 
