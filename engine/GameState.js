@@ -51,7 +51,11 @@ export class GameState {
     this.log = log;
     this.winner = null;
     this.dragonKilledThisTurnByCombat = false; // 竜餐の祭日などが参照する簡易フラグ
-    this.pendingEndPhaseEffects = { p1: [], p2: [] }; // 超越の遅延効果(自分のエンドフェイズ時)など
+    this.pendingEndPhaseEffects = { p1: [], p2: [] }; // 超越などによる「次のエンドフェイズに1回だけ」の遅延効果
+    // 注: 「超越したターンから継続的に毎エンドフェイズ発動する」効果(ダリアバーミリオン・ドラゴン等)は、
+    // クロージャをキューに積む方式だとFirebase同期時のhydrateGame()で復元できず消えてしまうため、
+    // instance.transcended(シリアライズ対象の通常フィールド)を見るonOwnEndPhaseフックとして
+    // effectRegistry.js側に実装している(pendingEndPhaseEffectsのような専用の永続キューは持たない)。
     this.pendingNextPlayerId = null; // endTurn()後、次のプレイヤーがstartTurn()を呼ぶまでの待機状態
   }
 
@@ -176,11 +180,12 @@ export class GameState {
       this.forceDraw(player, CONFIG.HAND_DRAW_SIZE);
     }
 
-    // 各モンスターの召喚酔い判定用フラグ・攻撃済みフラグをリセット
+    // 各モンスターの召喚酔い判定用フラグ・攻撃済みフラグ・「1ターンに1度」系フラグをリセット
     for (const m of player.board) {
       if (m) {
         m.hasAttackedThisTurn = false;
         m.invulnerableThisTurn = false;
+        m.onceEffectUsedThisTurn = {};
       }
     }
 
@@ -223,7 +228,7 @@ export class GameState {
       if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(player.id)], instance: m });
     }
 
-    // 超越などによって予約された、自分のエンドフェイズ時の遅延効果
+    // 超越などによって予約された、自分のエンドフェイズ時の遅延効果(1回限り、実行後にクリア)
     const pending = this.pendingEndPhaseEffects[player.id];
     this.pendingEndPhaseEffects[player.id] = [];
     for (const fn of pending) fn();
@@ -439,6 +444,27 @@ export class GameState {
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
   }
 
+  // ---------------- 起動効果(「1ターンに1度発動可能」等、召喚・超越・イベントに
+  // 紐付かない、モンスター単位の任意発動効果。例:オルレアホワイト・ドラゴン②) ----------------
+  // 同一モンスターにつき効果は基本1つを想定し、共通のフラグ(onceEffectUsedThisTurn.ability)
+  // で「このターン使用済みか」を管理する(startTurn()で毎ターン自動的にリセットされる)。
+  canActivateAbility(playerId, instance) {
+    const player = this.players[playerId];
+    if (!player.board.includes(instance)) return false;
+    const hook = EFFECTS[instance.defName]?.onActivate;
+    if (!hook) return false;
+    if (instance.onceEffectUsedThisTurn.ability) return false;
+    return true;
+  }
+
+  activateAbility(playerId, instance, params = {}) {
+    if (!this.canActivateAbility(playerId, instance)) throw new Error("この起動効果は今は使用できません");
+    const player = this.players[playerId];
+    const hook = EFFECTS[instance.defName]?.onActivate;
+    hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
+    instance.onceEffectUsedThisTurn.ability = true;
+  }
+
   hasKeyword(instance, keyword) {
     return instance.baseKeywords.has(keyword) || instance.grantedKeywords.has(keyword);
   }
@@ -511,7 +537,7 @@ export class GameState {
     const defenderDied = !opponent.board.includes(defender);
     if (stillAlive && defenderDied) {
       const hook = EFFECTS[attackerInstance.defName]?.onKillInCombat;
-      if (hook) hook({ game: this, player, instance: attackerInstance });
+      if (hook) hook({ game: this, player, opponent, instance: attackerInstance });
     }
     // 防御側(攻撃された側)の隠密は解除されない(解除は「自身が攻撃した」場合のみ)
   }
@@ -545,6 +571,13 @@ export class GameState {
     }
   }
 
+  // 「次のエンドフェイズに1回だけ」発動する効果を予約する。
+  // 注意: これはクロージャをその場で積む方式のため、次のendTurn()が呼ばれる前に
+  // オンライン対戦でhydrateGame()を挟む(相手のターンをまたぐ)ケースでは復元されず消える。
+  // 同じターン内の遅延処理(例:攻撃直後のエンドフェイズ)のような用途に限定して使うこと。
+  // 「超越したターン以降ずっと」のような複数ターンにまたがる継続効果には使わず、
+  // instance.transcended 等のシリアライズされるフィールドを見るonOwnEndPhaseフックで実装すること
+  // (ダリアバーミリオン・ドラゴン、デルフィニウムアズール・ドラゴンの実装を参照)。
   queueEndPhaseEffect(playerId, fn) {
     this.pendingEndPhaseEffects[playerId].push(fn);
   }
