@@ -594,6 +594,29 @@ export async function pickHandCard(candidates, label) {
   if (candidates.length === 1) return candidates[0];
   return pickFromList(candidates, label, (c) => c.defName);
 }
+// デッキ・ストレージ等、defName(文字列)の一覧から1枚を選ばせる用(滝の試練 等)。
+// 同名カードは1つにまとめて表示する(どの物理的な1枚を選んでも結果は同じため)。
+async function pickCardName(names, label) {
+  const unique = [...new Set(names)];
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0];
+  return pickFromList(unique, label, (n) => n);
+}
+// 場・手札から「亜竜種を合計2体」選ばせる用(デスラトル)。
+// {from:'board'|'hand', ref} の形で、選んだ順に最大2件返す。
+async function pickSacrifices(player, max, label) {
+  const boardPool = player.board.filter((m) => m && m.race === "亜竜").map((m) => ({ from: "board", ref: m, label: `[場] ${m.defName}` }));
+  const handPool = player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "亜竜").map((c) => ({ from: "hand", ref: c, label: `[手札] ${c.defName}` }));
+  const pool = [...boardPool, ...handPool];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体)`, (p) => p.label);
+    if (pick === CANCELLED) return CANCELLED;
+    chosen.push({ from: pick.from, ref: pick.ref });
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
+}
 // 「〜できる」系の複数選択(最大max体)。1体ずつ選んでいき、いつでも
 // 「これ以上選ばない」で打ち切れる(0体選択も可能=完全に任意)。
 async function pickUpTo(names, max, label) {
@@ -603,6 +626,23 @@ async function pickUpTo(names, max, label) {
     const cancelLabel = chosen.length > 0 ? `これ以上選ばない(${chosen.length}体で確定)` : "誰も選ばない";
     const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体まで選択可)`, (n) => n, cancelLabel);
     if (pick === CANCELLED) break;
+    chosen.push(pick);
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
+}
+// モンスターインスタンスを対象に、ちょうどmax体を選ばせる用(デスラトル等、
+// 「〜体を選び、それぞれに」という必須選択のケース。キャンセルはCANCELLEDを返す)
+async function pickMonstersUpTo(candidates, max, label) {
+  const pool = [...candidates];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const pick = await pickFromList(
+      pool,
+      `${label}(あと${max - chosen.length}体)`,
+      (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`
+    );
+    if (pick === CANCELLED) return CANCELLED;
     chosen.push(pick);
     pool.splice(pool.indexOf(pick), 1);
   }
@@ -630,9 +670,38 @@ const PARAM_BUILDERS = {
     return { discardHandUid: c?.uid };
   },
   滝の試練: async ({ player, selfUid }) => {
-    const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
-    if (c === CANCELLED) return null;
-    return { discardHandUid: c?.uid };
+    const discard = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
+    if (discard === CANCELLED) return null;
+    if (!discard) return null;
+
+    // デッキ優先・デッキに無ければストレージから、ドラゴン種をプレイヤーが選ぶ
+    const deckDragons = player.deck.filter((n) => CARD_DEFS[n]?.race === "ドラゴン");
+    const useDeck = deckDragons.length > 0;
+    const pool = useDeck ? deckDragons : player.storage.filter((n) => CARD_DEFS[n]?.race === "ドラゴン");
+    if (pool.length === 0) {
+      alert("デッキ・ストレージにドラゴン種が見つかりません");
+      return null;
+    }
+    const fetchName = await pickCardName(pool, `${useDeck ? "デッキ" : "ストレージ"}から手札に加えるドラゴン種`);
+    if (fetchName === CANCELLED || !fetchName) return null;
+    return { discardHandUid: discard.uid, fetchDefName: fetchName };
+  },
+  デスラトル: async ({ player, opponent }) => {
+    const sacrifices = await pickSacrifices(player, 2, "墓地へ送る亜竜種を選択");
+    if (sacrifices === CANCELLED) return null;
+    if (sacrifices.length !== 2) {
+      alert("自分の場・手札に、墓地へ送れる亜竜種が合計2体必要です");
+      return null;
+    }
+    const board = opponent.board.filter(Boolean);
+    let targets;
+    if (board.length <= 2) {
+      targets = board; // 選択の余地がない(0〜2体)ため自動対象
+    } else {
+      targets = await pickMonstersUpTo(board, 2, "16ダメージを与える敵モンスター");
+      if (targets === CANCELLED) return null;
+    }
+    return { sacrifices, targetMonsters: targets };
   },
   リバーススケイル: async ({ player }) => {
     const t = await pickMonster(player.board.filter((m) => m && (m.race === "ドラゴン" || m.race === "亜竜")), "攻撃力を上げる自分のモンスター");
@@ -666,6 +735,22 @@ const TRANSCEND_PARAM_BUILDERS = {
     );
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+};
+
+// 「1ターンに1度発動可能」等の起動効果(onActivate)用の対象選択ビルダー
+const ACTIVATE_PARAM_BUILDERS = {
+  オルレアホワイト・ドラゴン: async ({ player }) => {
+    const c = await pickHandCard(
+      player.hand.filter((c) => CARD_DEFS[c.defName]?.race === "ドラゴン"),
+      "除外するドラゴン種の手札"
+    );
+    if (c === CANCELLED) return null;
+    if (!c) {
+      alert("除外できるドラゴン種の手札がありません");
+      return null;
+    }
+    return { exileHandUid: c.uid };
   },
 };
 
@@ -704,6 +789,41 @@ function renderMonsterCard(ownerId, instance) {
   if (ownerId === myPlayerId && isMyAction) {
     // 超越がまだ使えない状態の残りターン数・使用可否は左列の常設「超越」ボックスに
     // プレイヤー単位で表示・操作するため、モンスターカード上には超越ボタンを置かない
+
+    // 「1ターンに1度発動可能」等の起動効果(onActivate)を持つカードは、
+    // このターン未使用ならモンスターカード上に専用ボタンを表示する
+    if (game.canActivateAbility(myPlayerId, instance)) {
+      const abilityBtn = document.createElement("button");
+      abilityBtn.className = "tr-btn";
+      abilityBtn.textContent = "起動効果を使う";
+      abilityBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const player = game.players[myPlayerId];
+        const opponent = game.players[opponentId()];
+        const builder = ACTIVATE_PARAM_BUILDERS[instance.defName];
+        let params;
+        try {
+          params = builder ? await builder({ player, opponent }) : {};
+        } catch (err) {
+          alert(`対象選択中にエラーが発生しました: ${err.message}`);
+          render();
+          return;
+        }
+        if (params === null) {
+          render();
+          return; // 対象選択をキャンセル → 発動自体を中断
+        }
+        try {
+          game.activateAbility(myPlayerId, instance, params);
+          await pushState();
+        } catch (err) {
+          alert(err.message);
+        }
+        render();
+      };
+      el.appendChild(abilityBtn);
+    }
+
     if (transcendSelectMode) el.classList.add("transcend-candidate");
     el.onclick = async () => {
       if (transcendSelectMode) {
