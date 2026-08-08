@@ -57,6 +57,18 @@ export class GameState {
     // instance.transcended(シリアライズ対象の通常フィールド)を見るonOwnEndPhaseフックとして
     // effectRegistry.js側に実装している(pendingEndPhaseEffectsのような専用の永続キューは持たない)。
     this.pendingNextPlayerId = null; // endTurn()後、次のプレイヤーがstartTurn()を呼ぶまでの待機状態
+
+    // UI側の演出・効果音のためのイベントキュー。GameStateはDOMやサウンドについて
+    // 一切知らないままにしておきたいので、「何が起きたか」だけをここに積んでおき、
+    // UI側がrender()の直後にこの配列を読み取って演出を出し、読み終わったら空にする。
+    // (シリアライズ対象には含めない。オンライン対戦の相手クライアント側では、
+    //  hydrateGame()直後は空配列になるだけで問題ない)
+    this.uiEvents = [];
+  }
+
+  // UIイベントを1件積む(内部ヘルパー)
+  emitUiEvent(evt) {
+    this.uiEvents.push(evt);
   }
 
   opponentOf(playerId) {
@@ -292,6 +304,7 @@ export class GameState {
     }
     const defName = player.deck.pop();
     player.hand.push({ uid: genUid(), defName, hold: false });
+    this.emitUiEvent({ type: "draw", playerId: player.id });
     return true;
   }
 
@@ -343,6 +356,7 @@ export class GameState {
     player.board[targetSlot] = instance;
 
     this.log(`${playerId}: 『${defName}』を召喚(${targetSlot}枠)`);
+    this.emitUiEvent({ type: "summon", playerId, slot: targetSlot, defName });
 
     const hook = EFFECTS[defName]?.onSummon;
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
@@ -359,6 +373,7 @@ export class GameState {
     for (const k of grantedKeywords) instance.grantedKeywords.add(k);
     player.board[boardSlot] = instance;
     this.log(`${playerId}: 『${defName}』を特殊召喚(デッキ外生成, ${boardSlot}枠)`);
+    this.emitUiEvent({ type: "summon", playerId, slot: boardSlot, defName });
     return instance;
   }
 
@@ -373,6 +388,7 @@ export class GameState {
     if (slot !== -1) player.board[slot] = null;
     player.graveyard.push(instance.defName);
     this.log(`${player.id}: 『${instance.defName}』が場を離れた(墓地へ)`);
+    this.emitUiEvent({ type: "destroy", ownerId: player.id, slot, defName: instance.defName });
 
     // 相手ターン中に自分の場のモンスターが0体になったらシールドは0にリセット
     const aliveCount = player.board.filter(Boolean).length;
@@ -513,6 +529,7 @@ export class GameState {
       }
       opponent.hp -= dmg;
       this.log(`${playerId}: 『${attackerInstance.defName}』がプレイヤーに直接攻撃(${dmg}ダメージ、残りシールド${opponent.shield})`);
+      this.emitUiEvent({ type: "damagePlayer", playerId: opponent.id, amount: dmg });
       attackerInstance.hasAttackedThisTurn = true;
       if (this.hasKeyword(attackerInstance, KEYWORDS.ONMITSU)) this.removeStealthOnAttack(attackerInstance);
       this.checkWinCondition();
@@ -626,7 +643,9 @@ export class GameState {
 
   dealDamageToMonster(defenderPlayer, instance, amount) {
     if (instance.invulnerableThisTurn) return;
+    const slot = defenderPlayer.board.indexOf(instance);
     instance.currentHp -= amount;
+    this.emitUiEvent({ type: "damageMonster", ownerId: defenderPlayer.id, slot, amount, defName: instance.defName });
     if (instance.currentHp <= 0) this.sendToGraveyard(defenderPlayer, instance);
   }
 
@@ -644,6 +663,15 @@ export class GameState {
   healPlayer(player, amount) {
     player.hp = Math.min(player.hp + amount, CONFIG.MAX_HP);
     this.log(`${player.id}: 体力が${amount}回復(現在${player.hp})`);
+    this.emitUiEvent({ type: "healPlayer", playerId: player.id, amount });
+  }
+
+  // イベント効果や超越の継続効果など、戦闘以外の直接プレイヤーへのダメージ用の共通ヘルパー
+  dealDamageToPlayer(player, amount) {
+    player.hp -= amount;
+    this.log(`${player.id}: 直接${amount}ダメージ(残りHP${player.hp})`);
+    this.emitUiEvent({ type: "damagePlayer", playerId: player.id, amount });
+    this.checkWinCondition();
   }
 
   buffOwnRace(player, race, atkDelta, hpDelta) {
