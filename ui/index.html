@@ -10,6 +10,7 @@
   <header>
     <h1>カードゲーム デバッグ画面 <span class="sub">(1人で両プレイヤーを操作するローカル検証用)</span></h1>
     <div id="turn-info"></div>
+    <button class="btn-open-rules">ルール</button>
   </header>
 
   <main>
@@ -32,7 +33,7 @@
           </div>
         </div>
         <div class="board-row" id="board-p2"></div>
-        <div class="zone-box event-zone-box">
+        <div class="zone-box event-zone-box" id="event-zone-p2">
           <div class="zone-label">イベント<br />ゾーン</div>
         </div>
         <div class="side-col right-stack">
@@ -81,7 +82,7 @@
           </div>
         </div>
         <div class="board-row" id="board-p1"></div>
-        <div class="zone-box event-zone-box">
+        <div class="zone-box event-zone-box" id="event-zone-p1">
           <div class="zone-label">イベント<br />ゾーン</div>
         </div>
         <div class="side-col right-stack">
@@ -126,6 +127,16 @@
         <button id="picker-modal-cancel">キャンセル</button>
       </div>
       <div id="picker-modal-list"></div>
+    </div>
+  </div>
+
+  <div id="rules-modal-overlay" style="display:none;">
+    <div id="rules-modal">
+      <div id="rules-modal-header">
+        <button id="btn-close-rules">✕ 閉じる</button>
+        <span class="rules-modal-title">ルール説明</span>
+      </div>
+      <div id="rules-modal-content"></div>
     </div>
   </div>
 
