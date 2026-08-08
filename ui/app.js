@@ -1,6 +1,7 @@
 import { GameState } from "../engine/GameState.js";
 import { KEYWORDS, CONFIG } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
+import { flushUiEvents } from "./fx.js";
 
 // ==========================================================
 // ログ
@@ -250,6 +251,7 @@ function costHtml(cost) {
 function renderMonsterCard(playerId, instance, slot) {
   const el = document.createElement("div");
   el.className = "card";
+  el.dataset.slot = String(slot);
   const kws = [...keywordSet(instance)];
   const sick = instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
   if (sick) el.classList.add("sick");
@@ -346,6 +348,7 @@ function renderBoard(playerId) {
       container.appendChild(renderMonsterCard(playerId, m, slot));
     } else {
       const el = renderEmptySlot();
+      el.dataset.slot = String(slot);
       if (playerId === game.activePlayerId && !game.winner && selectedHandCard && selectedHandCard.type === "モンスター") {
         el.classList.remove("empty-slot");
         el.textContent = "ここに召喚";
@@ -477,6 +480,18 @@ function renderHand(playerId) {
 
 const ZONE_LABELS = { deck: "デッキ", storage: "ストレージ", graveyard: "墓地", exile: "除外" };
 
+// ==========================================================
+// 演出・効果音: game.uiEvents を読み取る際に使う要素解決ヘルパー
+// ==========================================================
+function getMonsterSlotEl(ownerId, slot) {
+  const container = document.getElementById(`board-${ownerId}`);
+  if (!container) return null;
+  return container.querySelector(`[data-slot="${slot}"]`);
+}
+function getPlayerStatsEl(playerId) {
+  return document.getElementById(`stats-${playerId}`);
+}
+
 function openZoneModal(playerId, zoneKey) {
   const player = game.players[playerId];
   const cards = player[zoneKey] ?? [];
@@ -553,6 +568,11 @@ function renderStats(playerId) {
 }
 
 function render() {
+  renderInner();
+  flushUiEvents(game, { getMonsterSlotEl, getPlayerStatsEl });
+}
+
+function renderInner() {
   if (!game.gameStarted) {
     document.getElementById("turn-info").textContent = "マリガンフェーズ(両者とも準備ができたら確定してください)";
     renderStats("p1");
