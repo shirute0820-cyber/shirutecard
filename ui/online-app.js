@@ -3,6 +3,7 @@ import { KEYWORDS, CONFIG } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { serializeGame, hydrateGame } from "../engine/serialization.js";
 import { flushUiEvents } from "./fx.js";
+import { setupRulesModal } from "./rules.js";
 import {
   DECK_SIZE,
   copyLimitOf,
@@ -26,8 +27,12 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-08.2";
+const APP_VERSION = "2026-08-08.3";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
+
+// ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
+// ここで一度だけ結びつけておけばよい
+setupRulesModal();
 
 // ==========================================================
 // ログ(画面上の簡易ログパネル用)
@@ -550,6 +555,7 @@ function opponentId() {
 // ==========================================================
 let selectedHandCard = null;
 let selectedAttacker = null;
+let draggedHandCard = null; // ドラッグ中の手札(クリック選択とは独立に管理): { uid, defName, type, releaseRequirement } | null
 let keepSelection = null;
 let mulliganReturn = new Set();
 let endGameConfirmPending = false; // 「ゲームを終了する」の2段階確認(誤操作防止のため)
@@ -755,6 +761,75 @@ const ACTIVATE_PARAM_BUILDERS = {
   },
 };
 
+// ==========================================================
+// 手札からの召喚・イベント発動の共通処理
+// (クリック操作・ドラッグ&ドロップ操作の両方から呼び出す)
+// ==========================================================
+
+// handCard: { uid, defName, type, releaseRequirement }
+// slot: モンスターを置く盤面枠(リリース召喚の場合は、リリース対象がいる枠を指定する)
+async function trySummonToSlot(handCard, slot) {
+  const player = game.players[myPlayerId];
+  const opponent = game.players[opponentId()];
+  const builder = PARAM_BUILDERS[handCard.defName];
+  let params;
+  try {
+    params = builder ? await builder({ player, opponent, selfUid: handCard.uid }) : {};
+  } catch (err) {
+    alert(`対象選択中にエラーが発生しました: ${err.message}`);
+    selectedHandCard = null;
+    draggedHandCard = null;
+    render();
+    return;
+  }
+  if (params === null) {
+    selectedHandCard = null;
+    draggedHandCard = null;
+    render();
+    return;
+  }
+  try {
+    game.summonFromHand(myPlayerId, handCard.uid, slot, params);
+    await pushState();
+  } catch (err) {
+    alert(err.message);
+  }
+  selectedHandCard = null;
+  draggedHandCard = null;
+  render();
+}
+
+async function tryPlayEvent(handCard) {
+  const player = game.players[myPlayerId];
+  const opponent = game.players[opponentId()];
+  const builder = PARAM_BUILDERS[handCard.defName];
+  let params;
+  try {
+    params = builder ? await builder({ player, opponent, selfUid: handCard.uid }) : {};
+  } catch (err) {
+    alert(`対象選択中にエラーが発生しました: ${err.message}`);
+    selectedHandCard = null;
+    draggedHandCard = null;
+    render();
+    return;
+  }
+  if (params === null) {
+    selectedHandCard = null;
+    draggedHandCard = null;
+    render();
+    return;
+  }
+  try {
+    game.playEvent(myPlayerId, handCard.uid, params);
+    await pushState();
+  } catch (err) {
+    alert(err.message);
+  }
+  selectedHandCard = null;
+  draggedHandCard = null;
+  render();
+}
+
 function keywordSet(instance) {
   return new Set([...instance.baseKeywords, ...instance.grantedKeywords]);
 }
@@ -778,7 +853,8 @@ function costHtml(cost) {
 function renderMonsterCard(ownerId, instance) {
   const el = document.createElement("div");
   el.className = "card";
-  el.dataset.slot = String(game.players[ownerId].board.indexOf(instance));
+  const slot = game.players[ownerId].board.indexOf(instance);
+  el.dataset.slot = String(slot);
   const kws = [...keywordSet(instance)];
   const sick =
     instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
@@ -788,7 +864,18 @@ function renderMonsterCard(ownerId, instance) {
 
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
-  if (ownerId === myPlayerId && isMyAction) {
+  // リリース召喚の対象候補(自分のターン中、選択中/ドラッグ中の手札のリリース条件に一致する場合)
+  const releaseReq = selectedHandCard?.releaseRequirement ?? draggedHandCard?.releaseRequirement ?? null;
+  const isReleaseCandidate = ownerId === myPlayerId && isMyAction && releaseReq === instance.defName;
+
+  if (ownerId === myPlayerId && isMyAction && selectedHandCard?.releaseRequirement === instance.defName) {
+    el.classList.add("release-target");
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const handCard = selectedHandCard;
+      trySummonToSlot(handCard, slot);
+    };
+  } else if (ownerId === myPlayerId && isMyAction) {
     // 超越がまだ使えない状態の残りターン数・使用可否は左列の常設「超越」ボックスに
     // プレイヤー単位で表示・操作するため、モンスターカード上には超越ボタンを置かない
 
@@ -870,6 +957,24 @@ function renderMonsterCard(ownerId, instance) {
       render();
     };
   }
+
+  // ドラッグ&ドロップ: このモンスターがリリース召喚の対象になり得る場合、
+  // ここへ手札のカードをドロップして召喚できるようにする
+  if (isReleaseCandidate) {
+    el.ondragover = (e) => {
+      e.preventDefault();
+      el.classList.add("drag-target");
+    };
+    el.ondragleave = () => el.classList.remove("drag-target");
+    el.ondrop = (e) => {
+      e.preventDefault();
+      el.classList.remove("drag-target");
+      if (draggedHandCard && draggedHandCard.releaseRequirement === instance.defName) {
+        trySummonToSlot(draggedHandCard, slot);
+      }
+    };
+  }
+
   return el;
 }
 
@@ -887,6 +992,8 @@ function renderBoard(role) {
   if (!game.gameStarted) return;
   const player = game.players[ownerId];
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
+  const clickSummonMode =
+    role === "me" && isMyAction && selectedHandCard?.type === "モンスター" && !selectedHandCard?.releaseRequirement;
 
   player.board.forEach((m, slot) => {
     if (m) {
@@ -894,38 +1001,53 @@ function renderBoard(role) {
     } else {
       const el = renderEmptySlot();
       el.dataset.slot = String(slot);
-      if (role === "me" && isMyAction && selectedHandCard && selectedHandCard.type === "モンスター") {
+      if (clickSummonMode) {
         el.classList.remove("empty-slot");
         el.textContent = "ここに召喚";
-        el.onclick = async () => {
-          const opponent = game.players[opponentId()];
-          const builder = PARAM_BUILDERS[selectedHandCard.defName];
-          let params;
-          try {
-            params = builder ? await builder({ player, opponent, selfUid: selectedHandCard.uid }) : {};
-          } catch (err) {
-            alert(`対象選択中にエラーが発生しました: ${err.message}`);
-            render();
-            return;
+        el.onclick = () => trySummonToSlot(selectedHandCard, slot);
+      }
+      // ドラッグ&ドロップ: 通常召喚(リリース不要)の手札を、この空き枠へドロップできる
+      if (role === "me" && isMyAction) {
+        el.ondragover = (e) => {
+          if (draggedHandCard && draggedHandCard.type === "モンスター" && !draggedHandCard.releaseRequirement) {
+            e.preventDefault();
+            el.classList.add("drag-target");
           }
-          if (params === null) {
-            // 対象選択をキャンセルした場合は、召喚自体を中断する(相手に公開しない)
-            render();
-            return;
+        };
+        el.ondragleave = () => el.classList.remove("drag-target");
+        el.ondrop = (e) => {
+          e.preventDefault();
+          el.classList.remove("drag-target");
+          if (draggedHandCard && draggedHandCard.type === "モンスター" && !draggedHandCard.releaseRequirement) {
+            trySummonToSlot(draggedHandCard, slot);
           }
-          try {
-            game.summonFromHand(myPlayerId, selectedHandCard.uid, slot, params);
-            await pushState();
-          } catch (err) {
-            alert(err.message);
-          }
-          selectedHandCard = null;
-          render();
         };
       }
       container.appendChild(el);
     }
   });
+
+  // イベントゾーン(自分側のみ): イベントカードをドラッグ&ドロップで発動できるようにする
+  if (role === "me") {
+    const eventZoneEl = document.getElementById("event-zone-me");
+    if (eventZoneEl) {
+      const canDropEvent = isMyAction;
+      eventZoneEl.ondragover = (e) => {
+        if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント") {
+          e.preventDefault();
+          eventZoneEl.classList.add("drag-target");
+        }
+      };
+      eventZoneEl.ondragleave = () => eventZoneEl.classList.remove("drag-target");
+      eventZoneEl.ondrop = (e) => {
+        e.preventDefault();
+        eventZoneEl.classList.remove("drag-target");
+        if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント") {
+          tryPlayEvent(draggedHandCard);
+        }
+      };
+    }
+  }
 }
 
 function renderHand(role) {
@@ -1001,50 +1123,31 @@ function renderHand(role) {
     el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
 
     if (isMyAction) {
-      el.onclick = async () => {
+      el.onclick = () => {
         if (def?.type === "イベント") {
-          const opponent = game.players[opponentId()];
-          const builder = PARAM_BUILDERS[c.defName];
-          let params;
-          try {
-            params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
-          } catch (err) {
-            alert(`対象選択中にエラーが発生しました: ${err.message}`);
-            render();
-            return;
-          }
-          if (params === null) return; // 対象選択をキャンセル → 発動自体を中断(相手に公開しない)
-          try {
-            game.playEvent(myPlayerId, c.uid, params);
-            await pushState();
-          } catch (err) {
-            alert(err.message);
-          }
-          render();
+          tryPlayEvent({ uid: c.uid, defName: c.defName, type: def.type });
           return;
         }
-        if (def?.releaseRequirement) {
-          const opponent = game.players[opponentId()];
-          const builder = PARAM_BUILDERS[c.defName];
-          let params;
-          try {
-            params = builder ? await builder({ player, opponent, selfUid: c.uid }) : {};
-          } catch (err) {
-            alert(`対象選択中にエラーが発生しました: ${err.message}`);
-            render();
-            return;
-          }
-          if (params === null) return; // 対象選択をキャンセル → 召喚自体を中断
-          try {
-            game.summonFromHand(myPlayerId, c.uid, null, params);
-            await pushState();
-          } catch (err) {
-            alert(err.message);
-          }
-          render();
-          return;
-        }
-        selectedHandCard = selectedHandCard?.uid === c.uid ? null : { uid: c.uid, defName: c.defName, type: def?.type };
+        // モンスターカードは、通常召喚(空き枠を選ぶ)・リリース召喚(リリース対象の枠を選ぶ)
+        // いずれも、まずはこのカードを「選択中」にするだけにする(誤操作防止のため、
+        // クリック1回で即座に召喚してしまうことはない)
+        selectedHandCard =
+          selectedHandCard?.uid === c.uid
+            ? null
+            : { uid: c.uid, defName: c.defName, type: def?.type, releaseRequirement: def?.releaseRequirement ?? null };
+        render();
+      };
+      // ドラッグ&ドロップ: 手札のカードを盤面(モンスター)・イベントゾーン(イベント)へ
+      // ドラッグして発動できるようにする(マウス操作向け。タッチ操作には非対応)
+      el.draggable = true;
+      el.ondragstart = (e) => {
+        draggedHandCard = { uid: c.uid, defName: c.defName, type: def?.type, releaseRequirement: def?.releaseRequirement ?? null };
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", c.uid);
+        render();
+      };
+      el.ondragend = () => {
+        draggedHandCard = null;
         render();
       };
     }
@@ -1348,7 +1451,11 @@ function renderInner() {
     : selectedAttacker
     ? `選択中: ${selectedAttacker.defName}(攻撃対象は相手モンスターをクリック、または相手の手札ゾーンをクリックでプレイヤーへ直接攻撃)`
     : selectedHandCard
-    ? `選択中の手札: ${selectedHandCard.defName}(空き枠をクリックして召喚)`
+    ? `選択中の手札: ${selectedHandCard.defName}(${
+        selectedHandCard.releaseRequirement
+          ? `『${selectedHandCard.releaseRequirement}』がいる枠をクリックしてリリース召喚`
+          : "空き枠をクリックして召喚"
+      })`
     : "";
 }
 
