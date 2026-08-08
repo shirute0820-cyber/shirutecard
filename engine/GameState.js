@@ -335,15 +335,17 @@ export class GameState {
     let targetSlot = boardSlot;
 
     if (def.releaseRequirement) {
-      const releaseIdx = player.board.findIndex(
-        (m) => m && m.defName === def.releaseRequirement
-      );
-      if (releaseIdx === -1) {
-        throw new Error(`『${def.releaseRequirement}』をリリースしないと召喚できません`);
+      // リリース召喚: どのモンスターをリリースするかは、必ず呼び出し側(UI)が
+      // 盤面枠を選んだ上で指定すること(誤操作防止のため、自動選択はしない)
+      if (targetSlot === null || targetSlot === undefined) {
+        throw new Error(`『${def.releaseRequirement}』がいる枠を選んでください`);
       }
-      this.sendToGraveyard(player, player.board[releaseIdx]);
-      // リリースしたモンスターがいた枠に、そのまま新しいモンスターを置く
-      targetSlot = releaseIdx;
+      const releaseTarget = player.board[targetSlot];
+      if (!releaseTarget || releaseTarget.defName !== def.releaseRequirement) {
+        throw new Error(`『${def.releaseRequirement}』がいる枠を選んでください`);
+      }
+      this.sendToGraveyard(player, releaseTarget);
+      // リリースしたモンスターがいた枠に、そのまま新しいモンスターを置く(targetSlotは変更不要)
     } else if (player.board[targetSlot]) {
       throw new Error("その盤面枠は空いていません");
     }
