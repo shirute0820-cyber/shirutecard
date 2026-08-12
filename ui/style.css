@@ -8,6 +8,7 @@
   --accent2: #5fb0c9;
   --danger: #e06565;
   --good: #6fbf73;
+  --select-glow: #ff3ec8; /* 選択中カード・対象選択モーダルを強調するための専用色(既存の枠色と被らない色にする) */
   /* カード枠色(コスト帯・カード種別ごと。コストが上がるほど「強そう」に見えるよう寒色→暖色→金の順に配色) */
   --tier-event: #8b5cf6;
   --tier-low: #38bdf8;
@@ -282,7 +283,20 @@ main {
   position: relative; /* ツールチップの基準位置にする */
 }
 .card:hover { border-color: var(--accent2); }
-.card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* 「選択中」の表示は、コスト帯(tier-low/mid/high)や状態(transcend-candidate等)の
+   枠色と同じ「border-color」を取り合っていたため、他の色付き枠と組み合わさると
+   選択中かどうか非常にわかりにくくなっていた(2026/08/12修正)。
+   そこで選択中の強調は既存のborder-colorとは競合しない外側のoutline+box-shadowに
+   分離し、専用色でゆっくり明滅させることで、他の枠色と共存しても常に判別できるようにした */
+.card.selected {
+  outline: 3px solid var(--select-glow);
+  outline-offset: 3px;
+  animation: card-selected-pulse 1s ease-in-out infinite;
+}
+@keyframes card-selected-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 62, 200, 0.0); }
+  50% { box-shadow: 0 0 12px 4px rgba(255, 62, 200, 0.65); }
+}
 .card.empty-slot { background: transparent; border-style: dashed; color: var(--muted); cursor: default; align-items: center; justify-content: center; }
 .card.event-zone { border-color: var(--tier-event); color: var(--tier-event); font-size: 11px; }
 .card .name { font-weight: 600; }
@@ -410,7 +424,12 @@ main {
 }
 .zone-link:hover { color: var(--accent); }
 
-#zone-modal-overlay {
+/* 中身を確認するだけの墓地・デッキ等のモーダルと、効果対象を選択させるpickerモーダルの
+   両方に適用する共通の背景オーバーレイ。以前は#picker-modal-overlay側にこのルールが
+   適用されておらず、画面中央に固定表示されず、DOM上の位置(相手盤面の横)にそのまま
+   表示されてしまい、スクロールしないと見えないことがあった(2026/08/12修正) */
+#zone-modal-overlay,
+#picker-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.6);
@@ -419,7 +438,8 @@ main {
   justify-content: center;
   z-index: 100;
 }
-#zone-modal {
+#zone-modal,
+#picker-modal-box {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -428,7 +448,19 @@ main {
   display: flex;
   flex-direction: column;
 }
-#zone-modal-header {
+/* pickerモーダル(効果対象の選択)は、単なる中身確認用のzone-modalと違い、
+   「プレイヤーの操作待ち」であることが一目でわかるよう、枠を強調色にして
+   ゆっくり明滅させる(対象選択中であることの明示) */
+#picker-modal-box {
+  border: 2px solid var(--select-glow);
+  animation: picker-modal-pulse 1.4s ease-in-out infinite;
+}
+@keyframes picker-modal-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 62, 200, 0.0); }
+  50% { box-shadow: 0 0 14px 3px rgba(255, 62, 200, 0.55); }
+}
+#zone-modal-header,
+#picker-modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -436,7 +468,25 @@ main {
   border-bottom: 1px solid var(--border);
   font-weight: 600;
 }
-#zone-modal-header button {
+#picker-modal-header {
+  background: rgba(255, 62, 200, 0.12);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+#picker-modal-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+#picker-modal-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--select-glow);
+  letter-spacing: 0.02em;
+}
+#zone-modal-header button,
+#picker-modal-header button {
   background: var(--accent);
   border: none;
   color: #1a1a1a;
