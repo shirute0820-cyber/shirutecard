@@ -27,7 +27,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-12.1";
+const APP_VERSION = "2026-08-12.2";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -660,6 +660,29 @@ const PARAM_BUILDERS = {
     const t = await pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+  レッドドラゴン: async ({ opponent }) => {
+    // 詳しい説明文:「相手の場にいるモンスター1体を選び」= プレイヤーが選ぶ
+    // (以前はPARAM_BUILDERSが未登録で、常に盤面の先頭のモンスターへ自動的にダメージが入っており、
+    //  選択権がなかったバグを修正)
+    const t = await pickMonster(opponent.board.filter(Boolean), "16ダメージを与える敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  ダリアバーミリオン・ドラゴン: async ({ opponent }) => {
+    // レッドドラゴンと同様、対象選択が未登録だったバグを修正
+    const t = await pickMonster(opponent.board.filter(Boolean), "24ダメージを与える敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  デルフィニウムアズール・ドラゴン: async ({ player }) => {
+    // 詳しい説明文:「墓地に存在する亜竜種を1体選び」= プレイヤーが選ぶ
+    // (以前は常に墓地の先頭の亜竜種を自動選択しており、選択権がなかったバグを修正)
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 1) return {}; // 選択の余地がない(0または1体)ため自動判定
+    const chosen = await pickCardName(eligible, "特殊召喚して蘇生する亜竜種");
+    if (chosen === CANCELLED) return null;
+    return { reviveTarget: chosen };
   },
   ドラゴンの眼光: async ({ opponent }) => {
     const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
