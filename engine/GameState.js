@@ -264,6 +264,13 @@ export class GameState {
         m.currentHp -= m.tempHpThisTurn;
         m.tempHpThisTurn = 0;
       }
+      // 超越の無敵は「超越を使った自分のターン中」だけの効果。
+      // 以前はstartTurn()側(=このプレイヤーの次の自ターン開始時)でしか解除されなかったため、
+      // 相手の1ターン分(=相手のonOwnEndPhase等)にまで無敵が持ち越されてしまうバグがあった
+      // (例: 6ターン目に超越→そのターンは無敵で正しいが、次の相手ターンの終了時効果
+      //  (オルレアホワイト・ドラゴン等)まで無敵が効いてしまい、本来発動するはずの破壊が
+      //  素通りしてしまっていた)。自分のターン終了時点でここで確実に解除する。
+      m.invulnerableThisTurn = false;
     }
 
     this.log(`${this.activePlayerId} ターン終了。手札${player.hand.length}枚、シールド${player.shield}`);
