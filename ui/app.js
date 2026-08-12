@@ -56,7 +56,7 @@ let mulliganReturn = { p1: new Set(), p2: new Set() }; // ゲーム開始時マ�
 // カード発動そのものを中断できるようにする。
 export const CANCELLED = Symbol("cancelled");
 
-function pickFromList(items, label, renderLabel) {
+function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル") {
   return new Promise((resolve) => {
     const overlay = document.getElementById("picker-modal-overlay");
     const title = document.getElementById("picker-modal-title");
@@ -75,6 +75,7 @@ function pickFromList(items, label, renderLabel) {
       };
       list.appendChild(btn);
     }
+    cancelBtn.textContent = cancelLabel;
     cancelBtn.onclick = () => {
       overlay.style.display = "none";
       resolve(CANCELLED);
@@ -128,6 +129,21 @@ async function pickMonstersUpTo(candidates, max, label) {
   }
   return chosen;
 }
+// 「〜できる」系の複数選択(最大max体)。1体ずつ選んでいき、いつでも
+// 「これ以上選ばない」で打ち切れる(0体選択も可能=完全に任意)。
+// (online-app.jsに存在しローカル版に無かったため2026/08/12に追加)
+async function pickUpTo(names, max, label) {
+  const pool = [...names];
+  const chosen = [];
+  while (chosen.length < max && pool.length > 0) {
+    const cancelLabel = chosen.length > 0 ? `これ以上選ばない(${chosen.length}体で確定)` : "誰も選ばない";
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体まで選択可)`, (n) => n, cancelLabel);
+    if (pick === CANCELLED) break;
+    chosen.push(pick);
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return chosen;
+}
 
 // PARAM_BUILDERSは、キャンセルされたらnullを返す(=カード発動自体を中断する合図)。
 // それ以外は通常通りparamsオブジェクトを返す。すべて非同期(モーダル待ち)。
@@ -136,6 +152,26 @@ const PARAM_BUILDERS = {
     const t = await pickMonster(opponent.board.filter(Boolean), "対象の敵モンスター");
     if (t === CANCELLED) return null;
     return { targetMonster: t };
+  },
+  レッドドラゴン: async ({ opponent }) => {
+    // 詳しい説明文:「相手の場にいるモンスター1体を選び」= プレイヤーが選ぶ
+    // (以前はPARAM_BUILDERSが未登録で、常に盤面の先頭のモンスターへ自動的にダメージが入っており、
+    //  選択権がなかったバグを修正。online-app.jsと同内容をローカル版にも反映)
+    const t = await pickMonster(opponent.board.filter(Boolean), "16ダメージを与える敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  ダリアバーミリオン・ドラゴン: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "24ダメージを与える敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  デルフィニウムアズール・ドラゴン: async ({ player }) => {
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 1) return {};
+    const chosen = await pickCardName(eligible, "特殊召喚して蘇生する亜竜種");
+    if (chosen === CANCELLED) return null;
+    return { reviveTarget: chosen };
   },
   ドラゴンの眼光: async ({ opponent }) => {
     const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
@@ -194,6 +230,19 @@ const PARAM_BUILDERS = {
       if (targets === CANCELLED) return null;
     }
     return { sacrifices, targetMonsters: targets };
+  },
+  ドラゴンの招集: async ({ player }) => {
+    // online-app.jsに存在しローカル版に無かった選択ロジックを追加(2026/08/12)
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 1) return {}; // 選択の余地がない(0または1体)ため自動判定
+    const chosen = await pickUpTo(eligible, 2, "デッキに戻す亜竜種");
+    return { returnTargets: chosen };
+  },
+  エンダーリコリス・ワイバーン: async ({ player }) => {
+    const eligible = player.graveyard.filter((n) => CARD_DEFS[n]?.race === "亜竜");
+    if (eligible.length <= 2) return {}; // 選択の余地がないため、自動で(最大2体)蘇生する
+    const chosen = await pickUpTo(eligible, 2, "墓地から蘇生する亜竜種");
+    return { reviveTargets: chosen };
   },
 };
 
