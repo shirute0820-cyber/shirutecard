@@ -333,16 +333,17 @@ export const EFFECTS = {
     },
   },
   デルフィニウムアズール・ドラゴン: {
-    onSummon({ game, player, opponent }) {
+    onSummon({ game, player, opponent, params }) {
       game.dealDamageToAllEnemyMonsters(opponent, 12);
-      const grave = player.graveyard.find((n) => CARD_DEF_RACE(n) === "亜竜");
-      if (grave) {
-        const slot = game.findEmptySlot(player);
-        if (slot !== -1) {
-          player.graveyard.splice(player.graveyard.indexOf(grave), 1);
-          game.specialSummonToken(player.id, grave, slot, { grantedKeywords: [KEYWORDS.CHOUHATSU] });
-        }
-      }
+      const eligible = player.graveyard.filter((n) => CARD_DEF_RACE(n) === "亜竜");
+      if (eligible.length === 0) return;
+      // 詳しい説明文:「墓地に存在する亜竜種を1体選び」= 複数いる場合はプレイヤーが選ぶ
+      // (以前はplayer.graveyard.find()で常に先頭の1体を自動選択しており、選択権がなかったバグを修正)
+      const chosenName = eligible.length === 1 ? eligible[0] : (params?.reviveTarget ?? eligible[0]);
+      const slot = game.findEmptySlot(player);
+      if (slot === -1) return;
+      player.graveyard.splice(player.graveyard.indexOf(chosenName), 1);
+      game.specialSummonToken(player.id, chosenName, slot, { grantedKeywords: [KEYWORDS.CHOUHATSU] });
     },
     // ダリアバーミリオン・ドラゴンと同様、超越した以降は毎エンドフェイズ継続的に発動する
     onOwnEndPhase({ game, player, instance }) {
