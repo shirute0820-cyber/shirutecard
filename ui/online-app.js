@@ -1,5 +1,5 @@
 import { GameState } from "../engine/GameState.js";
-import { KEYWORDS, CONFIG } from "../engine/constants.js";
+import { KEYWORDS, CONFIG, CARD_TYPES } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { serializeGame, hydrateGame } from "../engine/serialization.js";
 import { flushUiEvents } from "./fx.js";
@@ -27,7 +27,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-12.2";
+const APP_VERSION = "2026-08-13.1";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -37,14 +37,32 @@ setupRulesModal();
 // ==========================================================
 // ログ(画面上の簡易ログパネル用)
 // ==========================================================
-function pushLog(msg) {
+// game.logEntries(自分・相手どちらの行動も含む全履歴、Firebase経由で同期される)
+// を丸ごと読み取ってパネルを再構築する。個別の行を都度追記する方式ではなく、
+// render()のたびに全体を作り直す方式にすることで、相手クライアントから届いた
+// スナップショットでも自分のログ欄との内容のズレが起きないようにしている。
+//
+// カード名(『...』で囲まれた部分)は少し太字で強調する。
+function escapeHtmlLog(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function formatLogMessage(msg) {
+  return escapeHtmlLog(msg).replace(/『([^『』]+)』/g, "『<strong>$1</strong>』");
+}
+function renderLog(game) {
   const el = document.getElementById("log-content");
   if (!el) return;
-  const line = document.createElement("div");
-  line.textContent = msg;
-  el.appendChild(line);
-  el.scrollTop = el.scrollHeight;
+  const entries = game?.logEntries ?? [];
+  // 新しいログが常に上に来るよう、配列末尾(最新)から順に描画する
+  el.innerHTML = entries
+    .slice()
+    .reverse()
+    .map((e) => `<div>${formatLogMessage(e.msg)}</div>`)
+    .join("");
 }
+// GameStateへ渡す外部ログコールバック。表示自体はrenderLog()がrender()の
+// たびにgame.logEntriesから丸ごと再構築するため、ここでは何もしない。
+function pushLog() {}
 
 // ==========================================================
 // デッキ構築(複数デッキをこのブラウザに保存できる)
@@ -871,9 +889,12 @@ function costHtml(cost) {
 }
 
 // カードの枠色クラス判定(イベント/1〜3コスト/4〜7コスト/8,9コスト)
+function isEventType(type) {
+  return type === CARD_TYPES.EVENT || type === CARD_TYPES.PERSISTENT_EVENT;
+}
 function cardTierClass(def) {
   if (!def) return "";
-  if (def.type === "イベント") return "event";
+  if (isEventType(def.type)) return "event";
   const cost = def.cost;
   if (cost == null) return "";
   if (cost <= 3) return "tier-low";
@@ -1061,13 +1082,30 @@ function renderBoard(role) {
     }
   });
 
-  // イベントゾーン(自分側のみ): イベントカードをドラッグ&ドロップで発動できるようにする
-  if (role === "me") {
-    const eventZoneEl = document.getElementById("event-zone-me");
-    if (eventZoneEl) {
+  // イベントゾーン: 持続イベントがあればカード表示、無ければ通常のラベル表示(自分・相手とも表示)。
+  // ドラッグ&ドロップでの発動は自分側のみ操作可能。
+  const eventZoneEl = document.getElementById(`event-zone-${role}`);
+  if (eventZoneEl) {
+    const zoneDefName = player.eventZone;
+    if (zoneDefName) {
+      const zoneDef = CARD_DEFS[zoneDefName];
+      eventZoneEl.innerHTML = `
+        <div class="zone-label">イベント<br />ゾーン</div>
+        <div class="card event-zone-card">
+          <div class="name"><strong>${escapeHtml(zoneDefName)}</strong></div>
+          <div class="stat-line">コスト${costHtml(zoneDef?.cost)} 持続</div>
+          ${cardEffectTooltipHtml(zoneDefName)}
+        </div>
+      `;
+      eventZoneEl.classList.add("occupied");
+    } else {
+      eventZoneEl.innerHTML = `<div class="zone-label">イベント<br />ゾーン</div>`;
+      eventZoneEl.classList.remove("occupied");
+    }
+    if (role === "me") {
       const canDropEvent = isMyAction;
       eventZoneEl.ondragover = (e) => {
-        if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント") {
+        if (canDropEvent && draggedHandCard && isEventType(draggedHandCard.type)) {
           e.preventDefault();
           eventZoneEl.classList.add("drag-target");
         }
@@ -1076,7 +1114,7 @@ function renderBoard(role) {
       eventZoneEl.ondrop = (e) => {
         e.preventDefault();
         eventZoneEl.classList.remove("drag-target");
-        if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント") {
+        if (canDropEvent && draggedHandCard && isEventType(draggedHandCard.type)) {
           tryPlayEvent(draggedHandCard);
         }
       };
@@ -1158,7 +1196,7 @@ function renderHand(role) {
 
     if (isMyAction) {
       el.onclick = () => {
-        if (def?.type === "イベント") {
+        if (isEventType(def?.type)) {
           tryPlayEvent({ uid: c.uid, defName: c.defName, type: def.type });
           return;
         }
@@ -1399,6 +1437,7 @@ function updateTranscendBox() {
 
 function render() {
   renderInner();
+  renderLog(game);
   if (game) flushUiEvents(game, { getMonsterSlotEl, getPlayerStatsEl });
 }
 
