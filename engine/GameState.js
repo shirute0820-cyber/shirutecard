@@ -1,4 +1,4 @@
-import { KEYWORDS, CONFIG } from "./constants.js";
+import { KEYWORDS, CONFIG, CARD_TYPES } from "./constants.js";
 import { CARD_DEFS, createCardInstance } from "./cardDefinitions.js";
 import { EFFECTS } from "./effectRegistry.js";
 
@@ -23,6 +23,10 @@ function createPlayer(id, deckList) {
     graveyard: [],   // defName[]
     exile: [],       // defName[] (「除外」ゾーン)
     board: new Array(CONFIG.BOARD_MONSTER_SLOTS).fill(null),
+    // イベントゾーン(1枠)。「持続イベント」カード(破壊されない限り効果を発動し続ける、
+    // 通常のイベントとは別のカード種別)のdefNameのみを保持する。常に0〜1枚。
+    // 通常のイベントカードはここを経由せず、発動後すぐgraveyardへ送られる。
+    eventZone: null,
     hp: CONFIG.START_HP,
     shield: 0,
     ownTurnCount: 0,
@@ -48,7 +52,20 @@ export class GameState {
     this.turnNumber = 0;
     this.activePlayerId = null;
     this.phase = null;
-    this.log = log;
+    // ログ本文(相手クライアントにも表示できるよう、シリアライズ対象として永続化する)。
+    // this.log() は外部から渡されたコールバック(画面への即時追記など)を呼びつつ、
+    // 同じ内容をlogEntriesにも積む。hydrateGame()側でlogEntriesをスナップショットの
+    // 内容へ丸ごと差し替えれば、以後この関数が積む続きの分も自然につながる。
+    this.logEntries = [];
+    const externalLog = log;
+    this.log = (msg) => {
+      this.logEntries.push({
+        id: `l${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+        msg,
+        ts: Date.now(),
+      });
+      externalLog(msg);
+    };
     this.winner = null;
     this.dragonKilledThisTurnByCombat = false; // 竜餐の祭日などが参照する簡易フラグ
     this.pendingEndPhaseEffects = { p1: [], p2: [] }; // 超越などによる「次のエンドフェイズに1回だけ」の遅延効果
@@ -625,6 +642,19 @@ export class GameState {
 
   // ---------------- イベントカード ----------------
 
+  // イベントゾーンにある持続イベントカードを墓地へ送り、ゾーンを空ける。
+  // 他カードの効果(将来的な「相手の持続イベントを破壊する」効果等)からも呼び出せるよう、
+  // 汎用ヘルパーとして独立させている。ゾーンが元々空なら何もしない。
+  destroyEventZoneCard(playerId, reason = "破壊された") {
+    const player = this.players[playerId];
+    if (!player.eventZone) return;
+    const defName = player.eventZone;
+    player.graveyard.push(defName);
+    player.eventZone = null;
+    this.emitUiEvent({ type: "eventZoneDestroy", ownerId: player.id, defName });
+    this.log(`${player.id}: 持続イベント『${defName}』が${reason}(墓地へ)`);
+  }
+
   playEvent(playerId, handUid, params = {}) {
     const player = this.players[playerId];
     const idx = player.hand.findIndex((c) => c.uid === handUid);
@@ -632,20 +662,34 @@ export class GameState {
     const { defName } = player.hand[idx];
     const def = CARD_DEFS[defName];
     if (!def) throw new Error(`未定義カード: ${defName}`);
-    if (def.type !== "イベント") throw new Error("イベントカードではありません");
+    const isPersistent = def.type === CARD_TYPES.PERSISTENT_EVENT;
+    if (def.type !== CARD_TYPES.EVENT && !isPersistent) throw new Error("イベントカードではありません");
     if (player.resourceAvailable < def.cost) throw new Error("コストが足りません");
 
     const hook = EFFECTS[defName]?.onEvent;
-    if (!hook) throw new Error(`${defName} のイベント効果が未実装です`);
+    // 通常イベントは即時効果が本体のため、実装(onEvent)が無ければ発動不可。
+    // 持続イベントは「場に残り続けること」自体が効果になり得るため、
+    // 設置と同時に発動する追加効果が無い(onEvent未定義の)カードも許容する。
+    if (!hook && !isPersistent) throw new Error(`${defName} のイベント効果が未実装です`);
 
     const opponent = this.players[this.opponentOf(playerId)];
     // 発動条件・追加コストのチェックは各効果側で行い、満たさなければ例外を投げる
-    hook({ game: this, player, opponent, params });
+    hook?.({ game: this, player, opponent, params });
 
     player.resourceAvailable -= def.cost;
     player.hand.splice(idx, 1);
-    player.graveyard.push(defName);
-    this.log(`${playerId}: イベント『${defName}』を発動`);
+
+    if (isPersistent) {
+      // イベントゾーンには常に最大1枚まで。既に別の持続イベントがある場合は
+      // 古い方を墓地へ送ってから、新しい方に置き換える。
+      if (player.eventZone) this.destroyEventZoneCard(playerId, "新しい持続イベントに置き換えられ");
+      player.eventZone = defName;
+      this.emitUiEvent({ type: "eventZoneSet", ownerId: playerId, defName });
+      this.log(`${playerId}: 持続イベント『${defName}』をイベントゾーンに設置`);
+    } else {
+      player.graveyard.push(defName);
+      this.log(`${playerId}: イベント『${defName}』を発動`);
+    }
   }
 
   // ---------------- 汎用ヘルパー(効果登録で使い回す) ----------------
