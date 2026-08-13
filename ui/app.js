@@ -1,5 +1,5 @@
 import { GameState } from "../engine/GameState.js";
-import { KEYWORDS, CONFIG } from "../engine/constants.js";
+import { KEYWORDS, CONFIG, CARD_TYPES } from "../engine/constants.js";
 import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { flushUiEvents } from "./fx.js";
 import { setupRulesModal } from "./rules.js";
@@ -9,12 +9,28 @@ setupRulesModal();
 // ==========================================================
 // ログ
 // ==========================================================
+// game.logEntries(p1・p2どちらの行動も含む全履歴)を丸ごと読み取って
+// パネルを再構築する。新しいログが常に上に来るよう、最新のものから順に描画する。
+// カード名(『...』で囲まれた部分)は少し太字で強調する。
 const logEl = document.getElementById("log-content");
-function pushLog(msg) {
-  const line = document.createElement("div");
-  line.textContent = msg;
-  logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
+function escapeHtmlLog(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function formatLogMessage(msg) {
+  return escapeHtmlLog(msg).replace(/『([^『』]+)』/g, "『<strong>$1</strong>』");
+}
+function pushLog() {
+  // GameStateのthis.log()から毎回呼ばれるが、実際の描画はrenderLog()が
+  // game.logEntriesから毎回丸ごと再構築するため、ここでは何もしない。
+}
+function renderLog() {
+  if (!logEl) return;
+  const entries = game?.logEntries ?? [];
+  logEl.innerHTML = entries
+    .slice()
+    .reverse()
+    .map((e) => `<div>${formatLogMessage(e.msg)}</div>`)
+    .join("");
 }
 
 // ==========================================================
@@ -352,9 +368,12 @@ function costHtml(cost) {
 }
 
 // カードの枠色クラス判定(イベント/1〜3コスト/4〜7コスト/8,9コスト)
+function isEventType(type) {
+  return type === CARD_TYPES.EVENT || type === CARD_TYPES.PERSISTENT_EVENT;
+}
 function cardTierClass(def) {
   if (!def) return "";
-  if (def.type === "イベント") return "event";
+  if (isEventType(def.type)) return "event";
   const cost = def.cost;
   if (cost == null) return "";
   if (cost <= 3) return "tier-low";
@@ -529,12 +548,29 @@ function renderBoard(playerId) {
     }
   });
 
-  // イベントゾーン: イベントカードをドラッグ&ドロップで発動できるようにする
+  // イベントゾーン: 持続イベントがあればカード表示、無ければ通常のラベル表示。
+  // ドラッグ&ドロップでイベントカード(通常・持続とも)を発動できるようにする
   const eventZoneEl = document.getElementById(`event-zone-${playerId}`);
   if (eventZoneEl) {
+    const zoneDefName = player.eventZone;
+    if (zoneDefName) {
+      const zoneDef = CARD_DEFS[zoneDefName];
+      eventZoneEl.innerHTML = `
+        <div class="zone-label">イベント<br />ゾーン</div>
+        <div class="card event-zone-card">
+          <div class="name"><strong>${escapeHtml(zoneDefName)}</strong></div>
+          <div class="stat-line">コスト${costHtml(zoneDef?.cost)} 持続</div>
+          ${cardEffectTooltipHtml(zoneDefName)}
+        </div>
+      `;
+      eventZoneEl.classList.add("occupied");
+    } else {
+      eventZoneEl.innerHTML = `<div class="zone-label">イベント<br />ゾーン</div>`;
+      eventZoneEl.classList.remove("occupied");
+    }
     const canDropEvent = playerId === game.activePlayerId && !game.winner;
     eventZoneEl.ondragover = (e) => {
-      if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント" && draggedHandCard.playerId === playerId) {
+      if (canDropEvent && draggedHandCard && isEventType(draggedHandCard.type) && draggedHandCard.playerId === playerId) {
         e.preventDefault();
         eventZoneEl.classList.add("drag-target");
       }
@@ -543,7 +579,7 @@ function renderBoard(playerId) {
     eventZoneEl.ondrop = (e) => {
       e.preventDefault();
       eventZoneEl.classList.remove("drag-target");
-      if (canDropEvent && draggedHandCard && draggedHandCard.type === "イベント" && draggedHandCard.playerId === playerId) {
+      if (canDropEvent && draggedHandCard && isEventType(draggedHandCard.type) && draggedHandCard.playerId === playerId) {
         tryPlayEvent(playerId, draggedHandCard);
       }
     };
@@ -617,7 +653,7 @@ function renderHand(playerId) {
     `;
     if (playerId === game.activePlayerId && !game.winner) {
       el.onclick = () => {
-        if (def?.type === "イベント") {
+        if (isEventType(def?.type)) {
           tryPlayEvent(playerId, { playerId, uid: c.uid, defName: c.defName, type: def.type });
           return;
         }
@@ -739,6 +775,7 @@ function renderStats(playerId) {
 
 function render() {
   renderInner();
+  renderLog();
   flushUiEvents(game, { getMonsterSlotEl, getPlayerStatsEl });
 }
 
