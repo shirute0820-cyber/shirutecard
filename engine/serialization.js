@@ -90,6 +90,8 @@ function serializePlayer(p) {
     storage: [...p.storage],
     graveyard: [...p.graveyard],
     board: serializeBoard(p.board),
+    // イベントゾーン(持続イベントのdefName、無ければnull)
+    eventZone: p.eventZone ?? null,
     hp: p.hp,
     shield: p.shield,
     ownTurnCount: p.ownTurnCount,
@@ -112,6 +114,7 @@ function deserializePlayer(o) {
     storage: o.storage ?? [],
     graveyard: o.graveyard ?? [],
     exile: o.exile ?? [],
+    eventZone: o.eventZone ?? null,
     board: deserializeBoard(o.board),
   };
 }
@@ -148,6 +151,10 @@ export function serializeGame(game) {
     dragonKilledThisTurnByCombat: game.dragonKilledThisTurnByCombat,
     gameStarted: game.gameStarted,
     mulliganDone: game.mulliganDone ?? { p1: false, p2: false },
+    // 対戦ログ本文(自分・相手どちらの行動も含む全履歴)。書き込みのたびに
+    // 丸ごと乗せることで、相手クライアントが受け取った時点で今までの全行動を
+    // 復元・表示できる(board等ほかのフィールドと同じ「毎回フル同期」方式)。
+    logEntries: game.logEntries ?? [],
     // 演出・効果音用のイベントログ。この書き込みが発生させた分だけを乗せる
     // (受け取った側は、これを見て「何が起きたか」を再現し、その後クリアする)
     uiEvents: game.uiEvents ?? [],
@@ -179,6 +186,9 @@ export function hydrateGame(snapshot, { log = () => {} } = {}) {
   game.dragonKilledThisTurnByCombat = !!snapshot.dragonKilledThisTurnByCombat;
   game.gameStarted = !!snapshot.gameStarted;
   game.mulliganDone = snapshot.mulliganDone ?? { p1: false, p2: false };
+  // これまでの対戦ログ全履歴を復元する。これ以降にthis.log()が呼ばれた分は
+  // (コンストラクタで組んだラッパーの通り)このgame.logEntriesへ追記されていく。
+  game.logEntries = snapshot.logEntries ?? [];
   game.pendingEndPhaseEffects = { p1: [], p2: [] }; // 遅延効果の関数自体は復元不可(下記の注意点を参照)
   // このスナップショットが運んできた演出・効果音用イベント。受け取り側のrender()が
   // 読み取って再現し、その後クリアする(自分自身の書き込みのエコーはonValue側で
