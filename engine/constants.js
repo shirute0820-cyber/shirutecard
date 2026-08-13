@@ -20,6 +20,9 @@ export const PHASES = Object.freeze({
 export const CARD_TYPES = Object.freeze({
   MONSTER: "モンスター",
   EVENT: "イベント",
+  // 破壊されない限り効果を発動し続ける「持続イベント」。イベントゾーンに設置され、
+  // 発動後すぐ墓地へ送られる通常のイベントとは異なり、場に残り続ける(2026/08/13ルール確定)。
+  PERSISTENT_EVENT: "持続イベント",
 });
 
 export const CONFIG = Object.freeze({
