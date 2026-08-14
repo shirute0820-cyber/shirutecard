@@ -100,10 +100,15 @@ function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル"
   });
 }
 
+// モンスターの実効攻撃力(オーラ等を反映した表示用の値)。所有者はownerIdから引く
+function effAtk(m) {
+  return game.getEffectiveAtk(game.players[m.ownerId], m);
+}
+
 export async function pickMonster(candidates, label) {
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
-  return pickFromList(candidates, label, (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`);
+  return pickFromList(candidates, label, (m) => `${m.defName} (${effAtk(m)}/${m.currentHp})`);
 }
 
 export async function pickHandCard(candidates, label) {
@@ -138,7 +143,7 @@ async function pickMonstersUpTo(candidates, max, label) {
   const pool = [...candidates];
   const chosen = [];
   while (chosen.length < max && pool.length > 0) {
-    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体)`, (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`);
+    const pick = await pickFromList(pool, `${label}(あと${max - chosen.length}体)`, (m) => `${m.defName} (${effAtk(m)}/${m.currentHp})`);
     if (pick === CANCELLED) return CANCELLED;
     chosen.push(pick);
     pool.splice(pool.indexOf(pick), 1);
@@ -259,6 +264,53 @@ const PARAM_BUILDERS = {
     if (eligible.length <= 2) return {}; // 選択の余地がないため、自動で(最大2体)蘇生する
     const chosen = await pickUpTo(eligible, 2, "墓地から蘇生する亜竜種");
     return { reviveTargets: chosen };
+  },
+
+  // ---------- パラディンテーマ ----------
+  大天使ミカエル: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  火刑に処されし聖女: async ({ player, opponent }) => {
+    const count = player.graveyard.filter((n) => n === "天啓の聖女ジャンヌ・ダルク").length;
+    if (count < 1) return {}; // 墓地にジャンヌがいなければ、この効果は発動しない(対象選択も不要)
+    const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  聖女カトリーヌ: async ({ player }) => {
+    // 「できる」= 任意効果。デッキ優先、無ければストレージから、コスト2以下の聖女種を選ぶ
+    const filter = (n) => {
+      const d = CARD_DEFS[n];
+      return d && d.race?.includes("聖女") && (d.cost ?? 99) <= 2;
+    };
+    const deckPool = player.deck.filter(filter);
+    const usingDeck = deckPool.length > 0;
+    const pool = usingDeck ? deckPool : player.storage.filter(filter);
+    if (pool.length === 0) return {}; // 対象候補が無ければ何もしない
+    const chosen = await pickCardName(pool, `${usingDeck ? "デッキ" : "ストレージ"}から手札に加える聖女(コスト2以下)`);
+    if (chosen === CANCELLED || !chosen) return {};
+    return { fetchDefName: chosen, fromDeck: usingDeck };
+  },
+  異端審問官コーション: async ({ player, selfUid }) => {
+    const boardSources = player.board
+      .filter((m) => m && m.defName === "天啓の聖女ジャンヌ・ダルク")
+      .map((inst) => ({ from: "board", instance: inst, label: `[場] ${inst.defName}` }));
+    const handSources = player.hand
+      .filter((c) => c.uid !== selfUid && c.defName === "天啓の聖女ジャンヌ・ダルク")
+      .map((c) => ({ from: "hand", handUid: c.uid, label: `[手札] ${c.defName}` }));
+    const pool = [...boardSources, ...handSources];
+    if (pool.length === 0) {
+      alert("自分の場・手札に『天啓の聖女ジャンヌ・ダルク』が必要です");
+      return null;
+    }
+    const pick = pool.length === 1 ? pool[0] : await pickFromList(pool, "墓地へ送る『天啓の聖女ジャンヌ・ダルク』", (p) => p.label);
+    if (pick === CANCELLED) return null;
+    return {
+      sacrificeSource:
+        pick.from === "board" ? { from: "board", instance: pick.instance } : { from: "hand", handUid: pick.handUid },
+    };
   },
 };
 
@@ -393,7 +445,7 @@ function renderMonsterCard(playerId, instance, slot) {
   el.innerHTML = `
     <div class="race-line">${instance.race ?? ""}</div>
     <div class="name monster-name">${instance.defName}</div>
-    <div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div>
+    <div class="stat-line">${effAtk(instance)} / ${instance.currentHp}</div>
     <div class="keywords">${kws.join(" ")}</div>
     ${cardEffectTooltipHtml(instance.defName)}
   `;
