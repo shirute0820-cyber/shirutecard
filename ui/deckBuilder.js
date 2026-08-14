@@ -66,9 +66,9 @@ export function totalCount(counts) {
   return Object.values(counts).reduce((a, b) => a + b, 0);
 }
 
-// デッキ内で使われている「汎用以外」のテーマ一覧を返す(赤・パラディン等)。
+// デッキ内で使われている「汎用以外」のテーマ一覧を返す(赤・クレリック等)。
 // 汎用カードはどのデッキにも組み込めるが、汎用以外のテーマは1デッキにつき1つまでしか
-// 混在させられない(例: 赤テーマとパラディンテーマを同じデッキに入れることはできない)。
+// 混在させられない(例: 赤テーマとクレリックテーマを同じデッキに入れることはできない)。
 export function nonGenericThemesUsed(counts) {
   const themes = new Set();
   for (const name of Object.keys(counts)) {
@@ -198,7 +198,7 @@ export function listBuildableCards() {
     .sort((a, b) => (a.cost ?? 0) - (b.cost ?? 0) || a.name.localeCompare(b.name));
 }
 
-// デッキ構築画面のテーマタブ用: 実在する「汎用以外」のテーマ一覧(赤・パラディン等)を、
+// デッキ構築画面のテーマタブ用: 実在する「汎用以外」のテーマ一覧(赤・クレリック等)を、
 // カード定義の登場順で返す
 export function listNonGenericThemes() {
   const seen = new Set();
