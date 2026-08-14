@@ -223,6 +223,21 @@ const PARAM_BUILDERS = {
     if (c === CANCELLED) return null;
     return { targetHandUid: c?.uid };
   },
+  やり直し: async ({ player, selfUid }) => {
+    // 2026/08改訂: 手札2枚をストレージに移してから2ドローする効果に変更。
+    // 自分自身(やり直し本体)は候補から除外。残り手札が2枚以下なら選択の余地がないため自動(全部移す)。
+    const pool = player.hand.filter((c) => c.uid !== selfUid);
+    if (pool.length <= 2) return {};
+    const remaining = [...pool];
+    const chosen = [];
+    for (let i = 0; i < 2; i++) {
+      const pick = await pickHandCard(remaining, `ストレージに移す手札(あと${2 - i}枚)`);
+      if (pick === CANCELLED || !pick) return null;
+      chosen.push(pick.uid);
+      remaining.splice(remaining.indexOf(pick), 1);
+    }
+    return { discardHandUids: chosen };
+  },
   ドラゴンの血誓: async ({ player, selfUid }) => {
     const c = await pickHandCard(
       player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"),
