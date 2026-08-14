@@ -396,7 +396,7 @@ export class GameState {
     // sacrificeRequirement(異端審問官コーション等): 通常のコストを払わず、
     // 指定した名前のカードを自分の場・手札から墓地へ送ることで特殊召喚する専用の召喚方法
     const isSacrificeSummon = !!def.sacrificeRequirement;
-    const cost = Math.max(0, def.cost - (handEntry.costReduction || 0)); // 神の啓示によるコスト減少を反映
+    const cost = this.getEffectiveHandCost(player, handEntry, def); // 神の啓示・竜の里等によるコスト減少を反映
 
     if (!isSacrificeSummon && player.resourceAvailable < cost) {
       throw new Error("コストが足りません");
@@ -455,11 +455,20 @@ export class GameState {
 
     this.log(`${playerId}: 『${defName}』を召喚(${targetSlot}枠)`);
     this.emitUiEvent({ type: "summon", playerId, slot: targetSlot, defName });
+    this.applyZoneSummonBuff(player, instance);
 
     const hook = EFFECTS[defName]?.onSummon;
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
 
     return instance;
+  }
+
+  // 竜の里のような「イベントゾーンにいる間、場に出たドラゴン・亜竜種に+4/+4」系の
+  // 常時効果を、召喚経路(手札から/特殊召喚)を問わず一箇所で適用するための共通ヘルパー
+  applyZoneSummonBuff(player, instance) {
+    if (!player.eventZone) return;
+    const hook = EFFECTS[player.eventZone]?.onZoneSummon;
+    if (hook) hook({ game: this, player, instance });
   }
 
   // カード効果によるデッキ外からの特殊召喚(トークン的生成、在庫を消費しない)
@@ -472,6 +481,7 @@ export class GameState {
     player.board[boardSlot] = instance;
     this.log(`${playerId}: 『${defName}』を特殊召喚(デッキ外生成, ${boardSlot}枠)`);
     this.emitUiEvent({ type: "summon", playerId, slot: boardSlot, defName });
+    this.applyZoneSummonBuff(player, instance);
     return instance;
   }
 
@@ -607,8 +617,16 @@ export class GameState {
     instance.onceEffectUsedThisTurn.ability = true;
   }
 
+  // conditionalKeyword: 死神(「相手の場にモンスターがいないとき【速攻】」)のような、
+  // 固定付与ではなく参照するたびに条件を再評価するキーワード用のフック
   hasKeyword(instance, keyword) {
-    return instance.baseKeywords.has(keyword) || instance.grantedKeywords.has(keyword);
+    if (instance.baseKeywords.has(keyword) || instance.grantedKeywords.has(keyword)) return true;
+    const hook = EFFECTS[instance.defName]?.conditionalKeyword;
+    if (!hook) return false;
+    const player = this.players[instance.ownerId];
+    const opponent = this.players[this.opponentOf(instance.ownerId)];
+    const extra = hook({ game: this, player, opponent, instance }) || [];
+    return extra.includes(keyword);
   }
 
   // ---------------- 攻撃・戦闘 ----------------
@@ -712,12 +730,21 @@ export class GameState {
     if (defenderKakusatsu && !attackerInvuln) attackerDies = true;
 
     if (defenderDies) {
-      this.sendToGraveyard(defenderPlayer, defender);
-      if (attacker.race === "ドラゴン") this.dragonKilledThisTurnByCombat = true;
+      if (this.checkZoneCombatSave(defenderPlayer, defender)) {
+        // 竜の里③等: 破壊が無効化された場合、不自然にHPがマイナスのまま残らないよう1に補正する
+        defender.currentHp = 1;
+      } else {
+        this.sendToGraveyard(defenderPlayer, defender);
+        if (attacker.race === "ドラゴン") this.dragonKilledThisTurnByCombat = true;
+      }
     }
     if (attackerDies) {
-      this.sendToGraveyard(attackerPlayer, attacker);
-      if (defender.race === "ドラゴン") this.dragonKilledThisTurnByCombat = true;
+      if (this.checkZoneCombatSave(attackerPlayer, attacker)) {
+        attacker.currentHp = 1;
+      } else {
+        this.sendToGraveyard(attackerPlayer, attacker);
+        if (defender.race === "ドラゴン") this.dragonKilledThisTurnByCombat = true;
+      }
     }
   }
 
@@ -774,14 +801,42 @@ export class GameState {
   // イベントゾーンにある持続イベントカードを墓地へ送り、ゾーンを空ける。
   // 他カードの効果(将来的な「相手の持続イベントを破壊する」効果等)からも呼び出せるよう、
   // 汎用ヘルパーとして独立させている。ゾーンが元々空なら何もしない。
-  destroyEventZoneCard(playerId, reason = "破壊された") {
+  // protectedInstance: このカードが場を離れる原因になった(=このカード自身の効果で今まさに
+  // 救おうとしている)モンスターがあれば渡す。onZoneLeave側の巻き戻し処理で、そのインスタンスだけは
+  // 巻き戻しによる「HPが尽きたら墓地へ送る」自動処理の対象から除外するために使う
+  // (竜の里の③効果のように、戻す先から即座にまた破壊してしまうのを防ぐため)。
+  destroyEventZoneCard(playerId, reason = "破壊された", protectedInstance = null) {
     const player = this.players[playerId];
     if (!player.eventZone) return;
     const defName = player.eventZone;
+    const leaveHook = EFFECTS[defName]?.onZoneLeave;
+    if (leaveHook) leaveHook({ game: this, player, protectedInstance });
     player.graveyard.push(defName);
     player.eventZone = null;
     this.emitUiEvent({ type: "eventZoneDestroy", ownerId: player.id, defName });
     this.log(`${player.id}: 持続イベント『${defName}』が${reason}(墓地へ)`);
+  }
+
+  // 手札のカードを実際に召喚/発動する際のコストを計算する。
+  // 神の啓示によるそのカード固有の一時的なコスト減少(costReduction)に加え、
+  // 竜の里のような「イベントゾーンにいる間、条件に合う手札のコストを下げ続ける」
+  // 動的な減少もここでまとめて反映する(0未満にはならない)。
+  getEffectiveHandCost(player, handEntry, def) {
+    let cost = def.cost - (handEntry.costReduction || 0);
+    if (player.eventZone) {
+      const hook = EFFECTS[player.eventZone]?.zoneHandCostReduction;
+      if (hook) cost -= hook({ game: this, player, def });
+    }
+    return Math.max(0, cost);
+  }
+
+  // 自分のイベントゾーンにいる持続イベントの効果で、このインスタンスの戦闘破壊を
+  // 無効化できるかを確認し、できる場合はその場で発動する(例: 竜の里)。
+  checkZoneCombatSave(player, instance) {
+    if (!player.eventZone) return false;
+    const hook = EFFECTS[player.eventZone]?.preventCombatDestruction;
+    if (!hook) return false;
+    return hook({ game: this, player, instance });
   }
 
   playEvent(playerId, handUid, params = {}) {
@@ -794,7 +849,7 @@ export class GameState {
     if (!def) throw new Error(`未定義カード: ${defName}`);
     const isPersistent = def.type === CARD_TYPES.PERSISTENT_EVENT;
     if (def.type !== CARD_TYPES.EVENT && !isPersistent) throw new Error("イベントカードではありません");
-    const cost = Math.max(0, def.cost - (handEntry.costReduction || 0)); // 神の啓示によるコスト減少を反映
+    const cost = this.getEffectiveHandCost(player, handEntry, def); // 神の啓示・竜の里等によるコスト減少を反映
     if (player.resourceAvailable < cost) throw new Error("コストが足りません");
 
     const hook = EFFECTS[defName]?.onEvent;
@@ -805,16 +860,24 @@ export class GameState {
 
     const opponent = this.players[this.opponentOf(playerId)];
     // 発動条件・追加コストのチェックは各効果側で行い、満たさなければ例外を投げる
-    hook?.({ game: this, player, opponent, params });
+    hook?.({ game: this, player, opponent, params, selfHandUid: handUid });
 
     player.resourceAvailable -= cost;
-    player.hand.splice(idx, 1);
+    // onEventフック内で他の手札(ドラゴンの血誓・滝の試練・やり直し等)が先に取り除かれ、
+    // 配列のインデックスがずれている可能性があるため、自分自身の位置は改めて探し直す
+    // (summonFromHandの sacrificeSummon 処理と同じ考え方)。
+    const finalIdx = player.hand.findIndex((c) => c.uid === handUid);
+    if (finalIdx !== -1) player.hand.splice(finalIdx, 1);
 
     if (isPersistent) {
       // イベントゾーンには常に最大1枚まで。既に別の持続イベントがある場合は
       // 古い方を墓地へ送ってから、新しい方に置き換える。
       if (player.eventZone) this.destroyEventZoneCard(playerId, "新しい持続イベントに置き換えられ");
       player.eventZone = defName;
+      // 設置と同時に発動する「場にいる間ずっと」系の常時効果(例: 竜の里の+4/+4)を、
+      // 既に場にいる対象へ即座に適用する。
+      const enterHook = EFFECTS[defName]?.onZoneEnter;
+      if (enterHook) enterHook({ game: this, player });
       this.emitUiEvent({ type: "eventZoneSet", ownerId: playerId, defName });
       this.log(`${playerId}: 持続イベント『${defName}』をイベントゾーンに設置`);
     } else {
