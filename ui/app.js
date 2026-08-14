@@ -842,26 +842,26 @@ function closeZoneModal() {
 function renderStats(playerId) {
   const player = game.players[playerId];
 
-  // 常設のミニステータス(HP・コスト・後攻追加ドロー)
+  // 常設のミニステータス(HP・コスト・後攻エクストラコスト)
   const el = document.getElementById(`stats-${playerId}`);
   el.innerHTML = `
     HP: <b>${player.hp}</b> ／
     コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b>
     ${
       player.id === game.secondPlayerId
-        ? `<button id="bonus-draw-btn" ${
-            player.secondPlayerBonusDrawsRemaining <= 0 || player.secondPlayerBonusDrawUsedThisTurn ? "disabled" : ""
-          }>後攻追加ドローを使う(残り${player.secondPlayerBonusDrawsRemaining}回${
-            player.secondPlayerBonusDrawUsedThisTurn ? "・このターンは使用済み" : ""
+        ? `<button id="bonus-cost-btn" ${
+            player.secondPlayerBonusCostRemaining <= 0 || player.secondPlayerBonusCostUsedThisTurn ? "disabled" : ""
+          }>後攻エクストラコストを使う(残り${player.secondPlayerBonusCostRemaining}回${
+            player.secondPlayerBonusCostUsedThisTurn ? "・このターンは使用済み" : ""
           })</button>`
         : ""
     }
   `;
-  const bonusBtn = document.getElementById("bonus-draw-btn");
+  const bonusBtn = document.getElementById("bonus-cost-btn");
   if (bonusBtn) {
     bonusBtn.onclick = () => {
       try {
-        game.useSecondPlayerBonusDraw(playerId);
+        game.useSecondPlayerBonusCost(playerId);
       } catch (err) {
         alert(err.message);
       }
