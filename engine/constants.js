@@ -39,7 +39,9 @@ export const CONFIG = Object.freeze({
   RESOURCE_MAX: 9,
   RESOURCE_STEP: 2,
   RESOURCE_STEP_EVERY_N_OWN_TURNS: 2,
-  TRANSCEND_MIN_TURN: 4,      // グローバル4ターン目以降で使用可能
+  TRANSCEND_MIN_TURN: 4,      // 後攻はグローバル4ターン目(=自分の4ターン目)から、先攻はその1ターン後(5ターン目)から使用可能
+                               // (2026/08/14変更: 「4ターン目以降」から「4ターン目の後攻から」に変更。
+                               //  実際の判定はGameState.transcendMinTurnFor()を参照)
   TRANSCEND_COOLDOWN: 3,      // 使用後3ターンは(誰であっても)再使用不可
   TRANSCEND_MAX_BONUS: 20,    // 攻撃力・体力の増加量はターン数×2だが、この値で頭打ち
 });
