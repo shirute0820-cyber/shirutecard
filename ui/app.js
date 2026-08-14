@@ -266,7 +266,7 @@ const PARAM_BUILDERS = {
     return { reviveTargets: chosen };
   },
 
-  // ---------- パラディンテーマ ----------
+  // ---------- クレリックテーマ ----------
   大天使ミカエル: async ({ opponent }) => {
     const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
     if (t === CANCELLED) return null;
