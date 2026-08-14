@@ -37,17 +37,17 @@ export const CARD_DEFS = {
   },
   死神: { cardId: 113,
     theme: "汎用",
-    effect: "【貫通】",
+    effect: "【貫通】①相手の場にモンスターが存在しないとき、これは【速攻】を持つ。",
     name: "死神", type: CARD_TYPES.MONSTER, cost: 9, atk: 32, hp: 4,
     race: "闇", keywords: [KEYWORDS.KANTSUU],
   },
   投石: { cardId: 101, name: "投石", type: CARD_TYPES.EVENT, cost: 1 , theme: "汎用", effect: "相手モンスター1体に4ダメージ。" },
-  やり直し: { cardId: 102, name: "やり直し", type: CARD_TYPES.EVENT, cost: 1 , theme: "汎用", effect: "カードを1枚ドローする。" },
+  やり直し: { cardId: 102, name: "やり直し", type: CARD_TYPES.EVENT, cost: 1 , theme: "汎用", effect: "自分の手札2枚をストレージに移す。その後、カードを2枚ドローする。" },
   祈り: { cardId: 104, name: "祈り", type: CARD_TYPES.EVENT, cost: 1 , theme: "汎用", effect: "自分の体力を4回復する。" },
   痛いのは嫌なので: { cardId: 106, name: "痛いのは嫌なので", type: CARD_TYPES.EVENT, cost: 2 , theme: "汎用", effect: "自分のシールド値を8上げる。" },
   用意周到: { cardId: 107, name: "用意周到", type: CARD_TYPES.EVENT, cost: 3 , theme: "汎用", effect: "自分の手札1枚に「保留」を付与する。" },
   明日から本気出す: { cardId: 108, name: "明日から本気出す", type: CARD_TYPES.EVENT, cost: 3 , theme: "汎用", effect: "ストレージのカードをすべてデッキに戻す。" },
-  シールドバッシュ: { cardId: 111, name: "シールドバッシュ", type: CARD_TYPES.EVENT, cost: 5 , theme: "汎用", effect: "相手のシールド値を0にする。" },
+  シールドバッシュ: { cardId: 111, name: "シールドバッシュ", type: CARD_TYPES.EVENT, cost: 4 , theme: "汎用", effect: "相手のシールド値を0にする。" },
   福音受けし者: { cardId: 109,
     theme: "汎用",
     effect: "場に出たとき、相手の場にいるモンスターすべてに4ダメージ。≪超越≫相手の場にいるモンスター1体を破壊する。",
@@ -167,6 +167,11 @@ export const CARD_DEFS = {
     name: "エンダーリコリス・ワイバーン", type: CARD_TYPES.MONSTER, cost: 8, atk: 28, hp: 28,
     race: "亜竜", keywords: [KEYWORDS.SOKKOU], cannotBeSpecialSummoned: true,
   },
+  竜の里: { cardId: 225,
+    theme: "赤",
+    effect: "①手札にあるドラゴン種のコストは-1される。②自分の場にいるドラゴン種・亜竜種は+4/+4される。③自分の場にいる元のコストが6以上のドラゴンが戦闘によって破壊されるとき、このカードを墓地に送ることで、その破壊を無効化する。",
+    name: "竜の里", type: CARD_TYPES.PERSISTENT_EVENT, cost: 3,
+  },
 
   // --- クレリックテーマ(友人考案) ---
   忠義の騎士ジル・ド・レェ: { cardId: 301,
@@ -254,5 +259,6 @@ export function createCardInstance(defName, ownerId, instanceId) {
     tempAtkThisTurn: 0, // 「ターン終了時まで」の一時的な攻撃力バフ(例:リバーススケイル)。endTurn()で自動的に元に戻す
     tempHpThisTurn: 0,  // 同上、体力版
     usedDoubleAttackThisTurn: false, // 天啓の聖女ジャンヌ・ダルク《超越》の2回攻撃用(1ターンに1度だけ再攻撃可能にする)
+    ryuunoSatoBuffed: false, // 竜の里の+4/+4が乗っているか(竜の里がゾーンを離れる際の巻き戻し判定用)
   };
 }
