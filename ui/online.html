@@ -156,9 +156,25 @@
   .deck-card.tier-mid { border-color: var(--tier-mid); }
   .deck-card.tier-high { border-color: var(--tier-high); box-shadow: 0 0 6px rgba(251, 191, 36, 0.35); }
   .deck-card.theme-赤 { border-color: #7a3b2e; }
+  .deck-card.theme-パラディン { border-color: #b08d2f; }
   .deck-card .cost-num { color: var(--accent); font-weight: 800; font-size: 1.25em; }
   .deck-card:hover .card-effect-tooltip { opacity: 1; }
   .deck-errors { color: var(--danger); font-size: 12px; margin-top: 10px; white-space: pre-wrap; }
+
+  #deck-theme-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  #deck-theme-tabs button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  #deck-theme-tabs button.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
+  #deck-theme-tabs button .theme-count { opacity: 0.75; font-weight: 400; margin-left: 4px; }
+  #deck-theme-hint { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
 </style>
 </head>
 <body>
@@ -206,6 +222,8 @@
       <button id="btn-deck-save" disabled>保存してホームに戻る</button>
       <button id="btn-deck-cancel">キャンセル</button>
     </div>
+    <div id="deck-theme-tabs"></div>
+    <p id="deck-theme-hint">テーマを選ぶと、汎用カード＋そのテーマのカードだけが表示されます(異なるテーマ同士は同じデッキに組み込めません)。</p>
     <div id="deck-card-list"></div>
     <div class="deck-errors" id="deck-errors"></div>
   </div>
