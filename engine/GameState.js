@@ -338,7 +338,11 @@ export class GameState {
 
   drawOne(player) {
     if (player.deck.length === 0) {
-      if (player.storage.length === 0) return false; // 引けるカードなし
+      if (player.storage.length === 0) {
+        this.log(`${player.id}: デッキ・ストレージがどちらも0枚のため引けません`);
+        this.checkWinCondition();
+        return false; // 引けるカードなし
+      }
       player.deck = shuffle(player.storage);
       player.storage = [];
       this.log(`${player.id}: デッキが尽きたためストレージがデッキに戻った`);
@@ -730,7 +734,20 @@ export class GameState {
     for (const pid of ["p1", "p2"]) {
       if (this.players[pid].hp <= 0) {
         this.winner = this.opponentOf(pid);
-        this.log(`${this.winner} の勝利!`);
+        this.log(`${this.winner} の勝利!(相手の体力が0)`);
+        return;
+      }
+    }
+    // デッキ・ストレージがどちらも0枚の状態でドローに失敗した場合の敗北条件(2026/08/14追加)。
+    // drawOne()側で、両方が0でドローできなかった直後にこのメソッドを呼ぶことで判定する
+    // (単に一時的にどちらも0枚になっただけでは負けにならず、実際にドローに失敗した瞬間のみ負けとする、
+    //  一般的なTCGの「デッキ切れ」と同じ考え方)
+    for (const pid of ["p1", "p2"]) {
+      const p = this.players[pid];
+      if (p.deck.length === 0 && p.storage.length === 0) {
+        this.winner = this.opponentOf(pid);
+        this.log(`${this.winner} の勝利!(相手のデッキ・ストレージが0枚)`);
+        return;
       }
     }
   }
