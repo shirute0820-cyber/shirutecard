@@ -98,6 +98,16 @@
     border-radius: 10px;
     flex-shrink: 0;
   }
+  .deck-row .deck-theme-badge {
+    background: var(--panel2, #262b34);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
   #deck-summary {
     position: sticky;
     top: 0;
@@ -173,6 +183,16 @@
   }
   #deck-theme-tabs button.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); }
   #deck-theme-tabs button .theme-count { opacity: 0.75; font-weight: 400; margin-left: 4px; }
+  .deck-theme-locked {
+    display: inline-block;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
   #deck-theme-hint { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
 </style>
 </head>
@@ -222,7 +242,7 @@
       <button id="btn-deck-cancel">キャンセル</button>
     </div>
     <div id="deck-theme-tabs"></div>
-    <p id="deck-theme-hint">テーマを選ぶと、汎用カード＋そのテーマのカードだけが表示されます(異なるテーマ同士は同じデッキに組み込めません)。</p>
+    <p id="deck-theme-hint">テーマはデッキ作成時に1つだけ選び、以後そのデッキでは変更できません。別のテーマで組みたい場合は「+ 新しいデッキを作る」から新規に作成してください。</p>
     <div id="deck-card-list"></div>
     <div class="deck-errors" id="deck-errors"></div>
   </div>
