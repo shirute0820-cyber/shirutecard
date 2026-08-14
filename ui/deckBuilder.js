@@ -197,3 +197,17 @@ export function listBuildableCards() {
     .filter((def) => copyLimitOf(def.name) > 0)
     .sort((a, b) => (a.cost ?? 0) - (b.cost ?? 0) || a.name.localeCompare(b.name));
 }
+
+// デッキ構築画面のテーマタブ用: 実在する「汎用以外」のテーマ一覧(赤・パラディン等)を、
+// カード定義の登場順で返す
+export function listNonGenericThemes() {
+  const seen = new Set();
+  const themes = [];
+  for (const def of listBuildableCards()) {
+    if (def.theme && def.theme !== "汎用" && !seen.has(def.theme)) {
+      seen.add(def.theme);
+      themes.push(def.theme);
+    }
+  }
+  return themes;
+}
