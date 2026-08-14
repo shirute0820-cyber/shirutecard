@@ -150,19 +150,11 @@
     font-weight: 700;
   }
   .deck-card .qty-row button:disabled { opacity: 0.3; cursor: not-allowed; }
-  /* コスト帯・カード種別による枠色。
-     汎用は無彩色(グレー)にし、コストが上がるほど段階的に濃くなるようにする(黒には
-     しない)。テーマ系(赤・クレリック等)だけ別途色相を持たせ、汎用と一目で区別できるようにする。
-     is-theme付き(2クラス)を後に書くことで、通常のtier-*(1クラス)より確実に優先されるようにしている */
-  .deck-card.event { border-color: #9aa0ac; }     /* 汎用・イベント(一番薄いグレー) */
-  .deck-card.tier-low { border-color: #7d838f; }  /* 汎用・低コスト */
-  .deck-card.tier-mid { border-color: #5f6570; }  /* 汎用・中コスト */
-  .deck-card.tier-high { border-color: #474c56; box-shadow: 0 0 6px rgba(154, 160, 172, 0.25); } /* 汎用・高コスト(一番濃いグレー。黒にはしない) */
-
-  .deck-card.is-theme.event { border-color: #1795c9; }     /* テーマ系・イベント(青寄り) */
-  .deck-card.is-theme.tier-low { border-color: #22c58f; }  /* テーマ系・低コスト(緑) */
-  .deck-card.is-theme.tier-mid { border-color: #158f52; }  /* テーマ系・中コスト(深緑) */
-  .deck-card.is-theme.tier-high { border-color: #c5b822; box-shadow: 0 0 6px rgba(197, 184, 34, 0.35); } /* テーマ系・高コスト(金緑) */
+  /* コスト帯・カード種別による枠色(汎用・テーマ系の区別はやめ、全カード共通にする) */
+  .deck-card.event { border-color: #1795c9; }     /* イベント(青) */
+  .deck-card.tier-low { border-color: #22c58f; }  /* 低コスト(緑) */
+  .deck-card.tier-mid { border-color: #d4c722; }  /* 中コスト(黄) */
+  .deck-card.tier-high { border-color: #e0392a; box-shadow: 0 0 6px rgba(224, 57, 42, 0.35); } /* 高コスト(赤) */
 
   .deck-card .cost-num { color: var(--accent); font-weight: 800; font-size: 1.25em; }
   .deck-card:hover .card-effect-tooltip { opacity: 1; }
