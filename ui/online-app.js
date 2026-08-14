@@ -12,6 +12,7 @@ import {
   validateDeck,
   nonGenericThemesUsed,
   listBuildableCards,
+  listNonGenericThemes,
   listDecks,
   createDeck,
   renameDeck,
@@ -28,7 +29,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-14.1";
+const APP_VERSION = "2026-08-14.2";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -70,6 +71,7 @@ function pushLog() {}
 // ==========================================================
 let editingDeckId = null; // デッキ編集画面で今どのデッキを編集しているか
 let deckBuilderDraft = null; // 編集中の一時的な枚数マップ(保存を押すまで確定しない)
+let deckBuilderTheme = null; // 編集中に選択中のテーマタブ(汎用以外)。nullなら未選択(赤・パラディン等の専用カードは一覧に出さない)
 
 function myDeckIsValid() {
   const active = getActiveDeck();
@@ -135,24 +137,61 @@ function openDeckBuilder(deckId) {
   if (!d) return;
   editingDeckId = deckId;
   deckBuilderDraft = { ...d.counts };
+  // 既にカードが入っているデッキなら、そのテーマを自動選択する。
+  // 空のデッキ(新規作成直後)は、最初のテーマを仮選択しておく(未選択のままだと
+  // テーマ専用カードが1枚も出せず不便なため)
+  const existingThemes = nonGenericThemesUsed(deckBuilderDraft);
+  const availableThemes = listNonGenericThemes();
+  deckBuilderTheme = existingThemes.size === 1 ? [...existingThemes][0] : (availableThemes[0] ?? null);
   document.getElementById("deck-name-input").value = d.name;
   document.getElementById("setup-screen").style.display = "none";
   document.getElementById("deck-screen").style.display = "block";
+  renderDeckThemeTabs();
   renderDeckBuilder();
 }
 
 function closeDeckBuilder() {
   editingDeckId = null;
   deckBuilderDraft = null;
+  deckBuilderTheme = null;
   document.getElementById("deck-screen").style.display = "none";
   document.getElementById("setup-screen").style.display = "block";
   renderDeckList();
 }
 
+// テーマ切り替えタブ(汎用以外のテーマから1つを選ぶ)。選択中のテーマ+汎用のカードだけが
+// 下の一覧に表示される(異なるテーマのカードは同じデッキに組み込めないため)。
+function renderDeckThemeTabs() {
+  const el = document.getElementById("deck-theme-tabs");
+  el.innerHTML = "";
+  for (const theme of listNonGenericThemes()) {
+    const btn = document.createElement("button");
+    const count = Object.entries(deckBuilderDraft)
+      .filter(([name]) => CARD_DEFS[name]?.theme === theme)
+      .reduce((sum, [, n]) => sum + n, 0);
+    btn.className = theme === deckBuilderTheme ? "active" : "";
+    btn.innerHTML = `${theme}${count > 0 ? `<span class="theme-count">(${count}枚)</span>` : ""}`;
+    btn.onclick = () => {
+      deckBuilderTheme = theme;
+      renderDeckThemeTabs();
+      renderDeckBuilder();
+    };
+    el.appendChild(btn);
+  }
+}
+
 function renderDeckBuilder() {
   const listEl = document.getElementById("deck-card-list");
   listEl.innerHTML = "";
-  for (const def of listBuildableCards()) {
+  // 表示対象: 汎用カード + 選択中テーマのカード。
+  // ただし、選択中でないテーマのカードが既にドラフトに残っている場合(タブを切り替えた後など)は、
+  // 減らして0にできるよう一覧に残す(見えない場所で枚数だけ残ってしまうのを防ぐため)
+  const visibleCards = listBuildableCards().filter((def) => {
+    if (def.theme === "汎用") return true;
+    if (def.theme === deckBuilderTheme) return true;
+    return (deckBuilderDraft[def.name] ?? 0) > 0;
+  });
+  for (const def of visibleCards) {
     const n = deckBuilderDraft[def.name] ?? 0;
     const limit = copyLimitOf(def.name);
     const el = document.createElement("div");
@@ -170,18 +209,18 @@ function renderDeckBuilder() {
     el.querySelector('[data-action="minus"]').onclick = () => {
       if (n > 0) deckBuilderDraft[def.name] = n - 1;
       if (deckBuilderDraft[def.name] === 0) delete deckBuilderDraft[def.name];
+      renderDeckThemeTabs();
       renderDeckBuilder();
     };
     const plusBtn = el.querySelector('[data-action="plus"]');
-    // 既に組み込まれている(汎用以外の)テーマと異なるテーマのカードは、
-    // それ以上増やせないようにする(デッキ保存時のエラーを待たず、その場で防ぐ)
-    const existingThemes = nonGenericThemesUsed(deckBuilderDraft);
-    const themeBlocked =
-      def.theme && def.theme !== "汎用" && n === 0 && existingThemes.size > 0 && !existingThemes.has(def.theme);
+    // 選択中のテーマ以外(汎用は除く)のカードは、この一覧上では増やせない
+    // (タブを切り替えて別テーマを選べば、そちらは増やせるようになる)
+    const themeBlocked = def.theme && def.theme !== "汎用" && def.theme !== deckBuilderTheme;
     plusBtn.disabled = n >= limit || themeBlocked;
-    plusBtn.title = themeBlocked ? `異なるテーマ(${[...existingThemes].join("・")})のカードと混在できません` : "";
+    plusBtn.title = themeBlocked ? `「${def.theme}」タブに切り替えると追加できます` : "";
     plusBtn.onclick = () => {
       deckBuilderDraft[def.name] = n + 1;
+      renderDeckThemeTabs();
       renderDeckBuilder();
     };
     listEl.appendChild(el);
