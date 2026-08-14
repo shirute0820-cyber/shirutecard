@@ -29,7 +29,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-14.4";
+const APP_VERSION = "2026-08-14.7";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -71,7 +71,7 @@ function pushLog() {}
 // ==========================================================
 let editingDeckId = null; // デッキ編集画面で今どのデッキを編集しているか
 let deckBuilderDraft = null; // 編集中の一時的な枚数マップ(保存を押すまで確定しない)
-let deckBuilderTheme = null; // 編集中に選択中のテーマタブ(汎用以外)。nullなら未選択(赤・パラディン等の専用カードは一覧に出さない)
+let deckBuilderTheme = null; // 編集中に選択中のテーマタブ(汎用以外)。nullなら未選択(赤・クレリック等の専用カードは一覧に出さない)
 
 function myDeckIsValid() {
   const active = getActiveDeck();
@@ -821,7 +821,7 @@ const PARAM_BUILDERS = {
   },
 };
 
-// ---------- パラディンテーマ ----------
+// ---------- クレリックテーマ ----------
 Object.assign(PARAM_BUILDERS, {
   大天使ミカエル: async ({ opponent }) => {
     const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
