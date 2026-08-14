@@ -316,7 +316,9 @@ main {
 .card.empty-slot { background: transparent; border-style: dashed; color: var(--muted); cursor: default; align-items: center; justify-content: center; }
 .card.event-zone { border-color: var(--tier-event); color: var(--tier-event); font-size: 11px; }
 .card .name { font-weight: 600; }
-.card .race-line {
+/* .race-line(カードの種類表示)は.card以外の場所(デッキ編集画面の.deck-card等)でも
+   使えるよう、.cardスコープに限定しない汎用クラスとして定義する(2026/08/14) */
+.race-line {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.2;
@@ -516,9 +518,33 @@ main {
   overflow-y: auto;
   font-size: 13px;
 }
-#zone-modal-content div {
-  padding: 3px 0;
+/* 直下の行(1枚ごとのカード)にのみ区切り線を入れる(直接の子要素にのみ適用する
+   ">"を使わないと、カード内の種類・効果文などの入れ子divにも線が入ってしまうため) */
+#zone-modal-content > div {
+  padding: 6px 0;
   border-bottom: 1px solid #22262e;
+}
+/* デッキ・ストレージ・墓地・除外の中身確認モーダル：種類・ステータス・効果文が
+   一目で分かるよう、名前だけの表示から1枚ずつのミニカード表示に変更(2026/08/14) */
+.zone-modal-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.zone-modal-card-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.zone-modal-card-meta {
+  font-size: 11px;
+  color: var(--accent2);
+  margin-top: 2px;
+}
+.zone-modal-card-effect {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: 4px;
 }
 
 #picker-modal-list {
@@ -540,6 +566,19 @@ main {
 }
 #picker-modal-list button.picker-item:hover {
   border-color: var(--accent2);
+}
+/* 選択肢の下に効果文を常時表示する(2026/08/14追加)。
+   選ぶ前に効果を確認できず選びにくい、というフィードバックを受けて、
+   .card-effect-tooltipのようなホバー依存の表示ではなく常時表示に変更した */
+.picker-item-name {
+  font-weight: 600;
+}
+.picker-item-effect {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: normal;
 }
 
 /* ルール説明モーダル。長文になるため、本文だけがスクロールし、
