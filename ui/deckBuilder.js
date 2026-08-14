@@ -117,7 +117,7 @@ function sanitizeCounts(counts) {
 
 // ---------------- 複数デッキ管理 ----------------
 
-// 保存されている全デッキの一覧(id・名前・合計枚数・有効かどうか)を返す
+// 保存されている全デッキの一覧(id・名前・テーマ・合計枚数・有効かどうか)を返す
 export function listDecks() {
   const data = loadDecksData();
   return Object.entries(data.decks).map(([id, d]) => {
@@ -125,6 +125,7 @@ export function listDecks() {
     return {
       id,
       name: d.name,
+      theme: d.theme ?? null,
       total: totalCount(counts),
       valid: validateDeck(counts).length === 0,
     };
@@ -142,12 +143,12 @@ export function setActiveDeckId(id) {
   writeDecksData(data);
 }
 
-// 指定したデッキの中身(id・名前・枚数マップ)を返す。存在しなければnull
+// 指定したデッキの中身(id・名前・テーマ・枚数マップ)を返す。存在しなければnull
 export function getDeck(id) {
   const data = loadDecksData();
   const d = data.decks[id];
   if (!d) return null;
-  return { id, name: d.name, counts: sanitizeCounts(d.counts) };
+  return { id, name: d.name, theme: d.theme ?? null, counts: sanitizeCounts(d.counts) };
 }
 
 // アクティブなデッキを返す(未設定/削除済みならnull)
@@ -157,14 +158,52 @@ export function getActiveDeck() {
   return getDeck(data.activeDeckId);
 }
 
-// 新しいデッキを作成してidを返す(最初のデッキなら自動的にアクティブになる)
-export function createDeck(name) {
+// 新しいデッキを作成してidを返す(最初のデッキなら自動的にアクティブになる)。
+// テーマ(汎用以外、例:赤・クレリック)は作成時に必ず1つ選んで固定する。
+// 作成後はそのデッキのテーマを変更できない(テーマを変えたい場合は新しいデッキを作る)。
+export function createDeck(name, theme) {
+  if (!theme || !listNonGenericThemes().includes(theme)) {
+    throw new Error("デッキ作成時にはテーマを1つ選んでください");
+  }
   const data = loadDecksData();
   const id = generateId();
-  data.decks[id] = { name: name?.trim() || "新しいデッキ", counts: {} };
+  data.decks[id] = { name: name?.trim() || "新しいデッキ", theme, counts: {} };
   if (!data.activeDeckId) data.activeDeckId = id;
   writeDecksData(data);
   return id;
+}
+
+// テーマが未設定(旧仕様で作られた空デッキ等)のデッキに、既存の枚数構成から
+// 推測できる場合はテーマを補完して保存する。判定できない場合はnullを返す
+// (呼び出し側でユーザーに選んでもらう必要がある)
+export function migrateDeckThemeIfNeeded(id) {
+  const data = loadDecksData();
+  const d = data.decks[id];
+  if (!d) return null;
+  if (d.theme) return d.theme;
+  const themes = nonGenericThemesUsed(sanitizeCounts(d.counts));
+  if (themes.size === 1) {
+    d.theme = [...themes][0];
+    writeDecksData(data);
+    return d.theme;
+  }
+  return null;
+}
+
+// テーマ未設定のデッキ(新規作成直後・旧仕様からの移行等)にテーマを1つ固定する。
+// 一度設定したテーマは(このデッキが存在する限り)変更できない
+export function setDeckTheme(id, theme) {
+  if (!theme || !listNonGenericThemes().includes(theme)) {
+    throw new Error("有効なテーマを選んでください");
+  }
+  const data = loadDecksData();
+  const d = data.decks[id];
+  if (!d) return;
+  if (d.theme && d.theme !== theme) {
+    throw new Error(`このデッキのテーマは既に『${d.theme}』に固定されています`);
+  }
+  d.theme = theme;
+  writeDecksData(data);
 }
 
 export function renameDeck(id, newName) {
@@ -174,10 +213,18 @@ export function renameDeck(id, newName) {
   writeDecksData(data);
 }
 
+// 保存するカード枚数は、そのデッキのテーマ+汎用のカードだけに絞り込む
+// (万一テーマ外のカードが紛れ込んでいても、保存時に自動的に除外される安全策)
 export function updateDeckCounts(id, counts) {
   const data = loadDecksData();
-  if (!data.decks[id]) return;
-  data.decks[id].counts = sanitizeCounts(counts);
+  const d = data.decks[id];
+  if (!d) return;
+  const cleaned = sanitizeCounts(counts);
+  for (const name of Object.keys(cleaned)) {
+    const def = CARD_DEFS[name];
+    if (def?.theme && def.theme !== "汎用" && def.theme !== d.theme) delete cleaned[name];
+  }
+  d.counts = cleaned;
   writeDecksData(data);
 }
 
@@ -198,8 +245,8 @@ export function listBuildableCards() {
     .sort((a, b) => (a.cost ?? 0) - (b.cost ?? 0) || a.name.localeCompare(b.name));
 }
 
-// デッキ構築画面のテーマタブ用: 実在する「汎用以外」のテーマ一覧(赤・クレリック等)を、
-// カード定義の登場順で返す
+// カード一覧画面(新規デッキ作成時のテーマ選択)用: 実在する「汎用以外」のテーマ一覧
+// (赤・クレリック等)を、カード定義の登場順で返す
 export function listNonGenericThemes() {
   const seen = new Set();
   const themes = [];
@@ -210,4 +257,9 @@ export function listNonGenericThemes() {
     }
   }
   return themes;
+}
+
+// 指定したテーマ+汎用のカードだけを返す(デッキ編集画面で使う)
+export function listBuildableCardsForTheme(theme) {
+  return listBuildableCards().filter((def) => def.theme === "汎用" || def.theme === theme);
 }
