@@ -10,6 +10,7 @@ import {
   expandDeckCounts,
   totalCount,
   validateDeck,
+  nonGenericThemesUsed,
   listBuildableCards,
   listDecks,
   createDeck,
@@ -27,7 +28,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-13.1";
+const APP_VERSION = "2026-08-14.1";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -172,7 +173,13 @@ function renderDeckBuilder() {
       renderDeckBuilder();
     };
     const plusBtn = el.querySelector('[data-action="plus"]');
-    plusBtn.disabled = n >= limit;
+    // 既に組み込まれている(汎用以外の)テーマと異なるテーマのカードは、
+    // それ以上増やせないようにする(デッキ保存時のエラーを待たず、その場で防ぐ)
+    const existingThemes = nonGenericThemesUsed(deckBuilderDraft);
+    const themeBlocked =
+      def.theme && def.theme !== "汎用" && n === 0 && existingThemes.size > 0 && !existingThemes.has(def.theme);
+    plusBtn.disabled = n >= limit || themeBlocked;
+    plusBtn.title = themeBlocked ? `異なるテーマ(${[...existingThemes].join("・")})のカードと混在できません` : "";
     plusBtn.onclick = () => {
       deckBuilderDraft[def.name] = n + 1;
       renderDeckBuilder();
@@ -609,10 +616,15 @@ function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル"
   });
 }
 
+// モンスターの実効攻撃力(オーラ等を反映した表示用の値)。所有者はownerIdから引く
+function effAtk(m) {
+  return game.getEffectiveAtk(game.players[m.ownerId], m);
+}
+
 export async function pickMonster(candidates, label) {
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
-  return pickFromList(candidates, label, (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`);
+  return pickFromList(candidates, label, (m) => `${m.defName} (${effAtk(m)}/${m.currentHp})`);
 }
 export async function pickHandCard(candidates, label) {
   if (candidates.length === 0) return null;
@@ -665,7 +677,7 @@ async function pickMonstersUpTo(candidates, max, label) {
     const pick = await pickFromList(
       pool,
       `${label}(あと${max - chosen.length}体)`,
-      (m) => `${m.defName} (${m.currentAtk}/${m.currentHp})`
+      (m) => `${m.defName} (${effAtk(m)}/${m.currentHp})`
     );
     if (pick === CANCELLED) return CANCELLED;
     chosen.push(pick);
@@ -769,6 +781,55 @@ const PARAM_BUILDERS = {
     return { reviveTargets: chosen };
   },
 };
+
+// ---------- パラディンテーマ ----------
+Object.assign(PARAM_BUILDERS, {
+  大天使ミカエル: async ({ opponent }) => {
+    const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  火刑に処されし聖女: async ({ player, opponent }) => {
+    const count = player.graveyard.filter((n) => n === "天啓の聖女ジャンヌ・ダルク").length;
+    if (count < 1) return {}; // 墓地にジャンヌがいなければ、この効果は発動しない(対象選択も不要)
+    const t = await pickMonster(opponent.board.filter(Boolean), "破壊する敵モンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  聖女カトリーヌ: async ({ player }) => {
+    // 「できる」= 任意効果。デッキ優先、無ければストレージから、コスト2以下の聖女種を選ぶ
+    const filter = (n) => {
+      const d = CARD_DEFS[n];
+      return d && d.race?.includes("聖女") && (d.cost ?? 99) <= 2;
+    };
+    const deckPool = player.deck.filter(filter);
+    const usingDeck = deckPool.length > 0;
+    const pool = usingDeck ? deckPool : player.storage.filter(filter);
+    if (pool.length === 0) return {}; // 対象候補が無ければ何もしない
+    const chosen = await pickCardName(pool, `${usingDeck ? "デッキ" : "ストレージ"}から手札に加える聖女(コスト2以下)`);
+    if (chosen === CANCELLED || !chosen) return {};
+    return { fetchDefName: chosen, fromDeck: usingDeck };
+  },
+  異端審問官コーション: async ({ player, selfUid }) => {
+    const boardSources = player.board
+      .filter((m) => m && m.defName === "天啓の聖女ジャンヌ・ダルク")
+      .map((inst) => ({ from: "board", instance: inst, label: `[場] ${inst.defName}` }));
+    const handSources = player.hand
+      .filter((c) => c.uid !== selfUid && c.defName === "天啓の聖女ジャンヌ・ダルク")
+      .map((c) => ({ from: "hand", handUid: c.uid, label: `[手札] ${c.defName}` }));
+    const pool = [...boardSources, ...handSources];
+    if (pool.length === 0) {
+      alert("自分の場・手札に『天啓の聖女ジャンヌ・ダルク』が必要です");
+      return null;
+    }
+    const pick = pool.length === 1 ? pool[0] : await pickFromList(pool, "墓地へ送る『天啓の聖女ジャンヌ・ダルク』", (p) => p.label);
+    if (pick === CANCELLED) return null;
+    return {
+      sacrificeSource:
+        pick.from === "board" ? { from: "board", instance: pick.instance } : { from: "hand", handUid: pick.handUid },
+    };
+  },
+});
 
 const TRANSCEND_PARAM_BUILDERS = {
   福音受けし者: async ({ opponent }) => {
@@ -915,7 +976,7 @@ function renderMonsterCard(ownerId, instance) {
     instance.summonedOnTurn === game.turnNumber && !kws.includes(KEYWORDS.SOKKOU) && !kws.includes(KEYWORDS.TOTSUGEKI);
   if (sick) el.classList.add("sick");
   if (selectedAttacker === instance) el.classList.add("selected");
-  el.innerHTML = `<div class="race-line">${instance.race ?? ""}</div><div class="name monster-name">${instance.defName}</div><div class="stat-line">${instance.currentAtk} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>${cardEffectTooltipHtml(instance.defName)}`;
+  el.innerHTML = `<div class="race-line">${instance.race ?? ""}</div><div class="name monster-name">${instance.defName}</div><div class="stat-line">${effAtk(instance)} / ${instance.currentHp}</div><div class="keywords">${kws.join(" ")}</div>${cardEffectTooltipHtml(instance.defName)}`;
 
   const isMyAction = game.gameStarted && !game.winner && game.activePlayerId === myPlayerId;
 
