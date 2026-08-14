@@ -37,6 +37,9 @@ function serializeMonster(m) {
     tempAtkThisTurn: m.tempAtkThisTurn ?? 0,
     tempHpThisTurn: m.tempHpThisTurn ?? 0,
     usedDoubleAttackThisTurn: m.usedDoubleAttackThisTurn ?? false,
+    // 竜の里の+4/+4がこのモンスターに乗っているか(竜の里がイベントゾーンを離れるとき、
+    // この印がついている対象だけ正確に巻き戻すために必要)
+    ryuunoSatoBuffed: !!m.ryuunoSatoBuffed,
   };
 }
 
@@ -53,6 +56,7 @@ function deserializeMonster(o) {
     tempAtkThisTurn: o.tempAtkThisTurn ?? 0,
     tempHpThisTurn: o.tempHpThisTurn ?? 0,
     usedDoubleAttackThisTurn: o.usedDoubleAttackThisTurn ?? false,
+    ryuunoSatoBuffed: !!o.ryuunoSatoBuffed,
   };
 }
 
