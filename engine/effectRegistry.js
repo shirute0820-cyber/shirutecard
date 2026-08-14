@@ -1,4 +1,4 @@
-import { KEYWORDS } from "./constants.js";
+import { KEYWORDS, CONFIG } from "./constants.js";
 
 // カード名をキーに、フックを登録する。
 // onSummon({game, player, instance, params})    … 場に出たとき
@@ -280,11 +280,12 @@ export const EFFECTS = {
       instance.tempAtkThisTurn += buffAmount; // ターン終了時まで(endTurn()で自動的に元へ戻る)
       game.log(`${player.id}: オルレアホワイト・ドラゴンが『${card.defName}』を除外し、攻撃力+${buffAmount}(ターン終了時まで)`);
     },
-    onOwnEndPhase({ game, opponent, instance }) {
-      // 正: 敵モンスターの現在HPが「このカードの現在の攻撃力(超越等の増加分も含む)」より
+    onOwnEndPhase({ game, player, opponent, instance }) {
+      // 正: 敵モンスターの現在HPが「このカードの現在の攻撃力(超越・オーラ等の増加分も含む)」より
       // 低いものをすべて破壊する(誤って自身のHPと比較していたバグを修正)
+      const myAtk = game.getEffectiveAtk(player, instance);
       for (const m of [...opponent.board]) {
-        if (m && m.currentHp < instance.currentAtk) {
+        if (m && m.currentHp < myAtk) {
           game.destroyMonster(opponent, m);
         }
       }
@@ -403,6 +404,139 @@ export const EFFECTS = {
         game.dealDamageToPlayer(opponent, 8);
         game.log(`${player.id}: ドラゴニュート・キングの超越効果で相手に8ダメージ`);
       }
+    },
+  },
+
+  // ---------- 聖女テーマ(友人考案) ----------
+  忠義の騎士ジル・ド・レェ: {
+    // ①「自分の場に聖女がいる間、戦闘以外のダメージを受けず、効果でも破壊されない」耐性は
+    // GameState.isImmuneToEffectHarm()側で一括判定しているため、ここには実装不要
+    // (個々のカード効果を書き換えずに済ませるための設計。詳しくは開発記録を参照)。
+    // ②このカードの攻撃力は、自分の墓地の『天啓の聖女ジャンヌ・ダルク』の枚数×4分、
+    // 常に(都度計算で)アップする
+    auraSelfAtk({ player }) {
+      const count = player.graveyard.filter((n) => n === "天啓の聖女ジャンヌ・ダルク").length;
+      return count * 4;
+    },
+  },
+  神託の修道士: {
+    onSummon({ game, player }) {
+      if (player.hp >= CONFIG.MAX_HP) {
+        game.drawOne(player);
+      } else {
+        game.healPlayer(player, 8);
+      }
+    },
+  },
+  天啓の聖女ジャンヌ・ダルク: {
+    // ①自分の場にいる他モンスター全員に+4を配るオーラ。同名が複数体いれば重複する
+    // (各ジャンヌが「自分以外全員」に+4を配るだけなので、特別な軽減処理は不要)
+    auraGiveAtk() {
+      return 4;
+    },
+    // 《超越》このカードは+12/+12され、1ターンに2回攻撃できるようになる。
+    // 効果文が明示的にステータス増加量を書いているため、通常の「ターン数×2(最大20)」の
+    // 計算式ではなく、固定+12/+12に置き換える(transcendStatBonusで上書き)
+    transcendStatBonus: 12,
+    onAfterAttack({ instance }) {
+      // 超越済みなら、1ターンに1度だけ「もう一度攻撃可能」状態に戻す
+      if (instance.transcended && !instance.usedDoubleAttackThisTurn) {
+        instance.usedDoubleAttackThisTurn = true;
+        instance.hasAttackedThisTurn = false;
+      }
+    },
+  },
+  神の啓示: {
+    onEvent({ game, player, params }) {
+      if (player.storage.length === 0) throw new Error("ストレージにカードがありません");
+      const chosenName = params?.fetchDefName ?? player.storage[0];
+      const idx = player.storage.indexOf(chosenName);
+      if (idx === -1) throw new Error("指定されたカードがストレージに見つかりません");
+      player.storage.splice(idx, 1);
+      player.deck.push(chosenName); // デッキの一番上(=次に引かれる位置)に置く
+      player.pendingCostReduction = { defName: chosenName, ownTurnCount: player.ownTurnCount + 1, amount: 3 };
+      game.log(`${player.id}: 『${chosenName}』をデッキの一番上に置いた(次の自ターンに引けばコスト-3)`);
+    },
+  },
+  聖騎士ライル: {
+    // 「敵を攻撃して破壊したとき」= 戦闘による撃破のみが対象(onKillInCombatは
+    // resolveCombat()経由の戦闘勝利時にしか呼ばれないため、効果による破壊は含まれない)
+    onKillInCombat({ game, player }) {
+      game.drawOne(player);
+    },
+  },
+  聖女カトリーヌ: {
+    // 「できる」= 任意効果。対象候補が無ければ何もしない
+    onSummon({ player, params }) {
+      const name = params?.fetchDefName;
+      if (!name) return;
+      const src = params.fromDeck ? player.deck : player.storage;
+      const idx = src.indexOf(name);
+      if (idx === -1) return;
+      src.splice(idx, 1);
+      player.hand.push({ uid: `t${Date.now()}${Math.random()}`, defName: name, hold: false });
+    },
+  },
+  オルレアンの民兵: {
+    onSummon({ game, player }) {
+      const slot = game.findEmptySlot(player);
+      if (slot === -1) return; // 自分の場に空きがなければ発動しない
+      // specialSummonToken()はonSummonフックを再発火させないため、これ以上連鎖しない
+      game.specialSummonToken(player.id, "オルレアンの民兵", slot);
+    },
+  },
+  聖旗: {
+    onEvent({ game, player }) {
+      const slot1 = game.findEmptySlot(player);
+      if (slot1 === -1) throw new Error("自分の場に空きがありません");
+      const jeanne = game.specialSummonToken(player.id, "天啓の聖女ジャンヌ・ダルク", slot1);
+      const slot2 = game.findEmptySlot(player);
+      if (slot2 !== -1) {
+        game.specialSummonToken(player.id, "忠義の騎士ジル・ド・レェ", slot2);
+      }
+      // 4ターン目以降のみ、この効果で出したジャンヌを自動的に超越させる
+      // (カード効果による自動超越のため、プレイヤーの3ターンクールダウンは消費しない)
+      if (game.turnNumber >= CONFIG.TRANSCEND_MIN_TURN) {
+        game.forceTranscend(player.id, jeanne);
+      }
+    },
+  },
+  大天使ミカエル: {
+    onSummon({ game, player, opponent, params }) {
+      const target = params?.targetMonster ?? opponent.board.find(Boolean);
+      if (target) game.destroyMonster(opponent, target);
+      game.healPlayer(player, 16);
+    },
+  },
+  異端審問官コーション: {
+    onSummon({ game, opponent }) {
+      const targets = opponent.board.filter(Boolean);
+      const count = targets.length;
+      for (const m of targets) game.destroyMonster(opponent, m);
+      if (count > 0) game.dealDamageToPlayer(opponent, count * 4);
+    },
+  },
+  火刑に処されし聖女: {
+    onSummon({ game, player, opponent, instance, params }) {
+      const count = player.graveyard.filter((n) => n === "天啓の聖女ジャンヌ・ダルク").length;
+      if (count >= 1) {
+        const target = params?.targetMonster ?? opponent.board.find(Boolean);
+        if (target) game.destroyMonster(opponent, target);
+      }
+      if (count >= 2) {
+        instance.currentAtk += 4;
+        instance.currentHp += 4;
+      }
+      if (count >= 3) {
+        const slot = game.findEmptySlot(player);
+        if (slot !== -1) game.specialSummonToken(player.id, "忠義の騎士ジル・ド・レェ", slot);
+      }
+      if (count >= 4) {
+        instance.grantedKeywords.add(KEYWORDS.SOKKOU);
+      }
+    },
+    onTranscend({ game, opponent }) {
+      game.dealDamageToPlayer(opponent, 20);
     },
   },
 };
