@@ -35,6 +35,10 @@ function createPlayer(id, deckList) {
     transcendCooldownUntilOwnTurn: 0, // 自分の「自ターン数」基準でのクールダウン(グローバル/ラウンドとは無関係)
     secondPlayerBonusDrawsRemaining: 2, // 後攻補正②(合計2回、ただし1ターンに1回まで)
     secondPlayerBonusDrawUsedThisTurn: false,
+    // 神の啓示: デッキの一番上に置いたカードが「次の自ターン」にドローされた場合のみ
+    // コスト減少を適用するための予約情報。{defName, ownTurnCount, amount} | null
+    // ドローされないままそのターンが終わると消滅する(endTurn()で破棄)。
+    pendingCostReduction: null,
   };
 }
 
@@ -215,6 +219,7 @@ export class GameState {
         m.hasAttackedThisTurn = false;
         m.invulnerableThisTurn = false;
         m.onceEffectUsedThisTurn = {};
+        m.usedDoubleAttackThisTurn = false; // 天啓の聖女ジャンヌ・ダルク《超越》の2回攻撃用
       }
     }
 
@@ -290,6 +295,18 @@ export class GameState {
       m.invulnerableThisTurn = false;
     }
 
+    // 神の啓示: 対象カードが「次の自ターン」にドローされないままターンが終わった場合、
+    // 予約情報を破棄する(効果消滅)。ドローされていた場合はpendingCostReductionは
+    // 既にdrawOne()側でnullになっている。
+    if (player.pendingCostReduction && player.pendingCostReduction.ownTurnCount === player.ownTurnCount) {
+      player.pendingCostReduction = null;
+    }
+    // 神の啓示のコスト減少は「次のターン」限定のため、そのターンのうちに使われなければ
+    // ターン終了時点で手札上のタグも失効させる
+    for (const c of player.hand) {
+      if (c.costReduction) c.costReduction = 0;
+    }
+
     this.log(`${this.activePlayerId} ターン終了。手札${player.hand.length}枚、シールド${player.shield}`);
 
     const nextId = this.opponentOf(this.activePlayerId);
@@ -327,7 +344,16 @@ export class GameState {
       this.log(`${player.id}: デッキが尽きたためストレージがデッキに戻った`);
     }
     const defName = player.deck.pop();
-    player.hand.push({ uid: genUid(), defName, hold: false });
+    const handCard = { uid: genUid(), defName, hold: false };
+    // 神の啓示: 予約されたカードをちょうどこのタイミング(対象の自ターン)で引いた場合のみ、
+    // コスト減少タグを付与する(それ以外のタイミングで同名カードを引いても対象外)
+    const pending = player.pendingCostReduction;
+    if (pending && pending.defName === defName && pending.ownTurnCount === player.ownTurnCount) {
+      handCard.costReduction = pending.amount;
+      player.pendingCostReduction = null;
+      this.log(`${player.id}: 『${defName}』をドロー(このターンのみコスト-${handCard.costReduction})`);
+    }
+    player.hand.push(handCard);
     this.emitUiEvent({ type: "draw", playerId: player.id });
     return true;
   }
@@ -348,15 +374,23 @@ export class GameState {
 
   summonFromHand(playerId, handUid, boardSlot, params = {}) {
     const player = this.players[playerId];
-    const idx = player.hand.findIndex((c) => c.uid === handUid);
-    if (idx === -1) throw new Error("手札にありません");
-    const { defName } = player.hand[idx];
+    const idx0 = player.hand.findIndex((c) => c.uid === handUid);
+    if (idx0 === -1) throw new Error("手札にありません");
+    const handEntry = player.hand[idx0];
+    const { defName } = handEntry;
     const def = CARD_DEFS[defName];
     if (!def) throw new Error(`未定義カード: ${defName}`);
     if (def.type !== "モンスター") throw new Error("モンスターカードではありません");
-    if (player.resourceAvailable < def.cost) throw new Error("コストが足りません");
 
-    let targetSlot = boardSlot;
+    const targetSlot = boardSlot;
+    // sacrificeRequirement(異端審問官コーション等): 通常のコストを払わず、
+    // 指定した名前のカードを自分の場・手札から墓地へ送ることで特殊召喚する専用の召喚方法
+    const isSacrificeSummon = !!def.sacrificeRequirement;
+    const cost = Math.max(0, def.cost - (handEntry.costReduction || 0)); // 神の啓示によるコスト減少を反映
+
+    if (!isSacrificeSummon && player.resourceAvailable < cost) {
+      throw new Error("コストが足りません");
+    }
 
     if (def.releaseRequirement) {
       // リリース召喚: どのモンスターをリリースするかは、必ず呼び出し側(UI)が
@@ -370,12 +404,40 @@ export class GameState {
       }
       this.sendToGraveyard(player, releaseTarget);
       // リリースしたモンスターがいた枠に、そのまま新しいモンスターを置く(targetSlotは変更不要)
+    } else if (isSacrificeSummon) {
+      if (targetSlot === null || targetSlot === undefined || player.board[targetSlot]) {
+        throw new Error("空いている盤面枠を選んでください");
+      }
+      const source = params.sacrificeSource; // {from:'board', instance} | {from:'hand', handUid}
+      if (!source) throw new Error(`『${def.sacrificeRequirement}』を場または手札から選んでください`);
+      if (source.from === "board") {
+        const inst = source.instance;
+        if (!inst || inst.defName !== def.sacrificeRequirement || !player.board.includes(inst)) {
+          throw new Error(`『${def.sacrificeRequirement}』がいる場のカードを選んでください`);
+        }
+        this.sendToGraveyard(player, inst);
+      } else if (source.from === "hand") {
+        const c = player.hand.find((h) => h.uid === source.handUid && h.uid !== handUid);
+        if (!c || c.defName !== def.sacrificeRequirement) {
+          throw new Error(`手札の『${def.sacrificeRequirement}』を選んでください`);
+        }
+        player.hand.splice(player.hand.indexOf(c), 1);
+        player.graveyard.push(c.defName);
+      } else {
+        throw new Error("送る対象の場所を指定してください");
+      }
     } else if (player.board[targetSlot]) {
       throw new Error("その盤面枠は空いていません");
     }
 
-    player.resourceAvailable -= def.cost;
-    player.hand.splice(idx, 1);
+    if (!isSacrificeSummon) {
+      player.resourceAvailable -= cost;
+    }
+
+    // sacrificeSummon側でhand配列が変化している可能性があるため、
+    // 自分自身(このカード)のインデックスは改めて探し直す
+    const finalIdx = player.hand.findIndex((c) => c.uid === handUid);
+    player.hand.splice(finalIdx, 1);
 
     const instance = createCardInstance(defName, playerId, genUid());
     instance.summonedOnTurn = this.turnNumber;
@@ -463,11 +525,15 @@ export class GameState {
     return { available: turnsLeft === 0, turnsLeft };
   }
 
-  useTranscend(playerId, instance, params = {}) {
-    if (!this.canTranscend(playerId, instance)) throw new Error("超越を使用できません");
+  // 超越の共通処理(ステータス増加・無敵付与・召喚酔い中の突撃状態付与・onTranscendフック)。
+  // useTranscend(プレイヤーが能動的に使用)とforceTranscend(カード効果による自動発動)の
+  // 両方から呼ばれる。呼び出し側でクールダウンの確認・消費だけ分けて行う。
+  applyTranscendEffect(playerId, instance, params) {
     const player = this.players[playerId];
-
-    const bonus = Math.min(this.turnNumber * 2, CONFIG.TRANSCEND_MAX_BONUS);
+    // カードによっては(天啓の聖女ジャンヌ・ダルク等)、通常の「ターン数×2(最大20)」という
+    // 増加量を、固定値に置き換えて定義できる(EFFECTS[...].transcendStatBonus)
+    const overrideBonus = EFFECTS[instance.defName]?.transcendStatBonus;
+    const bonus = overrideBonus !== undefined ? overrideBonus : Math.min(this.turnNumber * 2, CONFIG.TRANSCEND_MAX_BONUS);
     instance.currentAtk += bonus;
     instance.currentHp += bonus;
     instance.transcended = true;
@@ -478,12 +544,25 @@ export class GameState {
       instance.attackRestrictionThisTurn = "monsterOnly";
     }
 
-    player.transcendCooldownUntilOwnTurn = player.ownTurnCount + CONFIG.TRANSCEND_COOLDOWN;
-
     this.log(`${playerId}: 『${instance.defName}』が超越(+${bonus}/+${bonus})`);
 
     const hook = EFFECTS[instance.defName]?.onTranscend;
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
+  }
+
+  useTranscend(playerId, instance, params = {}) {
+    if (!this.canTranscend(playerId, instance)) throw new Error("超越を使用できません");
+    const player = this.players[playerId];
+    this.applyTranscendEffect(playerId, instance, params);
+    player.transcendCooldownUntilOwnTurn = player.ownTurnCount + CONFIG.TRANSCEND_COOLDOWN;
+  }
+
+  // カード効果による自動的な超越(例:聖旗)。2026/08/08付ルールにより、プレイヤーが
+  // 能動的に使う通常の超越とは別扱いとし、「1体につき1回」の制限だけを守り、
+  // プレイヤー単位の「3ターンクールダウン」は消費しない(確認・更新しない)。
+  forceTranscend(playerId, instance, params = {}) {
+    if (instance.transcended) return; // 1体につき1回の制限は自動超越でも適用される
+    this.applyTranscendEffect(playerId, instance, params);
   }
 
   // ---------------- 起動効果(「1ターンに1度発動可能」等、召喚・超越・イベントに
@@ -547,7 +626,7 @@ export class GameState {
       if (taunts.length > 0) throw new Error("挑発持ちがいるため直接攻撃できません");
 
       const kantsuu = this.hasKeyword(attackerInstance, KEYWORDS.KANTSUU);
-      let dmg = attackerInstance.currentAtk;
+      let dmg = this.getEffectiveAtk(player, attackerInstance);
       if (!kantsuu && opponent.shield > 0) {
         const absorbed = Math.min(opponent.shield, dmg);
         opponent.shield -= absorbed;
@@ -558,6 +637,7 @@ export class GameState {
       this.emitUiEvent({ type: "damagePlayer", playerId: opponent.id, amount: dmg });
       attackerInstance.hasAttackedThisTurn = true;
       if (this.hasKeyword(attackerInstance, KEYWORDS.ONMITSU)) this.removeStealthOnAttack(attackerInstance);
+      this.afterAttack(player, opponent, attackerInstance);
       this.checkWinCondition();
       return;
     }
@@ -574,6 +654,7 @@ export class GameState {
     this.resolveCombat(attackerInstance, defender, player, opponent);
     attackerInstance.hasAttackedThisTurn = true;
     if (this.hasKeyword(attackerInstance, KEYWORDS.ONMITSU)) this.removeStealthOnAttack(attackerInstance);
+    this.afterAttack(player, opponent, attackerInstance);
 
     // 「敵を破壊したとき、もう一度攻撃できる」系のフック(例: ドラゴニュート・キング)
     const stillAlive = player.board.includes(attackerInstance);
@@ -589,11 +670,16 @@ export class GameState {
     const attackerInvuln = attacker.invulnerableThisTurn;
     const defenderInvuln = defender.invulnerableThisTurn;
 
-    if (!defenderInvuln) defender.currentHp -= attacker.currentAtk;
-    if (!attackerInvuln) attacker.currentHp -= defender.currentAtk;
+    // 攻撃力はオーラ等(天啓の聖女ジャンヌ・ダルク、忠義の騎士ジル・ド・レェ等)を
+    // 反映した「その瞬間の実効値」で計算する
+    const attackerAtk = this.getEffectiveAtk(attackerPlayer, attacker);
+    const defenderAtk = this.getEffectiveAtk(defenderPlayer, defender);
+
+    if (!defenderInvuln) defender.currentHp -= attackerAtk;
+    if (!attackerInvuln) attacker.currentHp -= defenderAtk;
 
     this.log(
-      `戦闘: ${attacker.defName}(${attacker.currentAtk}/${attacker.currentHp}) vs ${defender.defName}(${defender.currentAtk}/${defender.currentHp})`
+      `戦闘: ${attacker.defName}(${attackerAtk}/${attacker.currentHp}) vs ${defender.defName}(${defenderAtk}/${defender.currentHp})`
     );
 
     const attackerKakusatsu = this.hasKeyword(attacker, KEYWORDS.KAKUSATSU);
@@ -631,6 +717,15 @@ export class GameState {
     instance.baseKeywords.delete(KEYWORDS.ONMITSU);
   }
 
+  // 「このモンスターが攻撃を行った直後」に呼ばれる汎用フック。
+  // 例: 天啓の聖女ジャンヌ・ダルクの《超越》「1ターンに2回攻撃できる」は、
+  // 1回目の攻撃直後にhasAttackedThisTurnを1度だけ再度falseへ戻すことで実現する
+  // (ドラゴニュート・キングの「敵を破壊したらもう一度攻撃できる」と同じ考え方の汎用化)。
+  afterAttack(player, opponent, instance) {
+    const hook = EFFECTS[instance.defName]?.onAfterAttack;
+    if (hook) hook({ game: this, player, opponent, instance });
+  }
+
   checkWinCondition() {
     for (const pid of ["p1", "p2"]) {
       if (this.players[pid].hp <= 0) {
@@ -659,12 +754,14 @@ export class GameState {
     const player = this.players[playerId];
     const idx = player.hand.findIndex((c) => c.uid === handUid);
     if (idx === -1) throw new Error("手札にありません");
-    const { defName } = player.hand[idx];
+    const handEntry = player.hand[idx];
+    const { defName } = handEntry;
     const def = CARD_DEFS[defName];
     if (!def) throw new Error(`未定義カード: ${defName}`);
     const isPersistent = def.type === CARD_TYPES.PERSISTENT_EVENT;
     if (def.type !== CARD_TYPES.EVENT && !isPersistent) throw new Error("イベントカードではありません");
-    if (player.resourceAvailable < def.cost) throw new Error("コストが足りません");
+    const cost = Math.max(0, def.cost - (handEntry.costReduction || 0)); // 神の啓示によるコスト減少を反映
+    if (player.resourceAvailable < cost) throw new Error("コストが足りません");
 
     const hook = EFFECTS[defName]?.onEvent;
     // 通常イベントは即時効果が本体のため、実装(onEvent)が無ければ発動不可。
@@ -676,7 +773,7 @@ export class GameState {
     // 発動条件・追加コストのチェックは各効果側で行い、満たさなければ例外を投げる
     hook?.({ game: this, player, opponent, params });
 
-    player.resourceAvailable -= def.cost;
+    player.resourceAvailable -= cost;
     player.hand.splice(idx, 1);
 
     if (isPersistent) {
@@ -692,10 +789,41 @@ export class GameState {
     }
   }
 
+  // ---------------- 攻撃力の実効値計算(オーラ対応) ----------------
+  // 「基礎値(currentAtk。超越等の恒久バフ・ターン限定の一時バフは通常通りここに含まれる)
+  //  ＋ その瞬間の盤面から都度計算するオーラ分」で実効攻撃力を返す。
+  // オーラ源が場を離れた瞬間、次にこの関数を呼んだ時点で自動的に反映されるため、
+  // バフの付与・除去処理をカード効果側で個別に追いかける必要がない。
+  // - auraSelfAtk({game, player, instance}): 自分自身の状態(墓地枚数等)を参照する
+  //   常時計算バフ(例: 忠義の騎士ジル・ド・レェ)
+  // - auraGiveAtk({game, player, source, target}): 自分以外の場のモンスター全員に
+  //   影響を与えるオーラ(例: 天啓の聖女ジャンヌ・ダルク)。targetは対象モンスター(常にsource以外)
+  getEffectiveAtk(player, instance) {
+    let atk = instance.currentAtk;
+    const selfHook = EFFECTS[instance.defName]?.auraSelfAtk;
+    if (selfHook) atk += selfHook({ game: this, player, instance });
+    for (const other of player.board) {
+      if (!other || other === instance) continue;
+      const hook = EFFECTS[other.defName]?.auraGiveAtk;
+      if (hook) atk += hook({ game: this, player, source: other, target: instance });
+    }
+    return atk;
+  }
+
+  // 忠義の騎士ジル・ド・レェの耐性(「自分の場に聖女がいるとき、戦闘以外のダメージを
+  // 受けず、効果で破壊されない」)を、個々のカード効果を書き換えずに一箇所で適用するための
+  // ガード。dealDamageToMonster/destroyMonsterの冒頭でチェックする(戦闘によるダメージ・破壊は
+  // resolveCombat()がこの2関数を経由せず直接処理しているため、この耐性の対象に自然と含まれない)。
+  isImmuneToEffectHarm(player, instance) {
+    if (instance.defName !== "忠義の騎士ジル・ド・レェ") return false;
+    return player.board.some((m) => m && CARD_DEFS[m.defName]?.race?.includes("聖女"));
+  }
+
   // ---------------- 汎用ヘルパー(効果登録で使い回す) ----------------
 
   dealDamageToMonster(defenderPlayer, instance, amount) {
     if (instance.invulnerableThisTurn) return;
+    if (this.isImmuneToEffectHarm(defenderPlayer, instance)) return;
     const slot = defenderPlayer.board.indexOf(instance);
     instance.currentHp -= amount;
     this.emitUiEvent({ type: "damageMonster", ownerId: defenderPlayer.id, slot, amount, defName: instance.defName });
@@ -710,6 +838,7 @@ export class GameState {
 
   destroyMonster(ownerPlayer, instance) {
     if (instance.invulnerableThisTurn) return;
+    if (this.isImmuneToEffectHarm(ownerPlayer, instance)) return;
     this.sendToGraveyard(ownerPlayer, instance);
   }
 
