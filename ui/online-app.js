@@ -195,8 +195,10 @@ function renderDeckBuilder() {
     const el = document.createElement("div");
     el.className = `deck-card ${cardTierClass(def)}`;
     el.innerHTML = `
+      ${raceLineHtml(def.name)}
       <div class="name">${def.name}</div>
       <div class="meta">コスト${costHtml(def.cost)} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
+      ${def.type === CARD_TYPES.MONSTER ? `<div class="meta">${def.atk} / ${def.hp}</div>` : ""}
       <div class="qty-row">
         <button data-action="minus">-</button>
         <span>${n} / ${limit}</span>
@@ -619,6 +621,18 @@ let transcendSelectMode = false; // 左列の「超越」ボックスをクリ�
 
 export const CANCELLED = Symbol("cancelled");
 
+// 選択肢の要素からカード名(defName)を推測する(効果テキスト表示用)。
+// pickCardName(文字列そのもの)・pickMonster/pickHandCard(.defNameを持つ)・
+// デスラトル等の{from,ref}型・異端審問官コーション等の{from,instance}型をカバーする。
+function resolveDefNameForPicker(item) {
+  if (typeof item === "string") return item;
+  if (item && typeof item === "object") {
+    if (item.defName) return item.defName;
+    if (item.ref && item.ref.defName) return item.ref.defName;
+    if (item.instance && item.instance.defName) return item.instance.defName;
+  }
+  return null;
+}
 function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル") {
   return new Promise((resolve) => {
     const overlay = document.getElementById("picker-modal-overlay");
@@ -631,7 +645,14 @@ function pickFromList(items, label, renderLabel, cancelLabel = "キャンセル"
     for (const item of items) {
       const btn = document.createElement("button");
       btn.className = "picker-item";
-      btn.textContent = renderLabel(item);
+      const defName = resolveDefNameForPicker(item);
+      const def = defName ? CARD_DEFS[defName] : null;
+      const labelText = renderLabel(item);
+      // 選択肢を選ぶ前に効果文を確認できるよう、名前の下に効果テキストを常時表示する
+      // (ホバーが効かないタッチ操作でも見えるようにするため、hoverツールチップ方式は使わない)
+      btn.innerHTML = def?.effect
+        ? `<div class="picker-item-name">${escapeHtml(labelText)}</div><div class="picker-item-effect">${escapeHtml(def.effect)}</div>`
+        : escapeHtml(labelText);
       btn.onclick = () => {
         overlay.style.display = "none";
         resolve(item);
@@ -984,6 +1005,26 @@ function cardEffectTooltipHtml(defName) {
   if (!def?.effect) return "";
   return `<div class="card-effect-tooltip">${escapeHtml(def.effect)}</div>`;
 }
+// カードの「種類」(race。光/闇/亜竜/ドラゴン/聖女/騎士等)を表示する行。
+// イベント系カードにはraceが無いため、その場合は何も表示しない。
+// (2026/08/14追加: 種類が確認できる場面が少ないというフィードバックを受け、
+//  盤面のモンスター表示で既に使っていた.race-lineのスタイルを他の表示箇所にも共通で使う)
+function raceLineHtml(defName) {
+  const def = CARD_DEFS[defName];
+  if (!def?.race) return "";
+  return `<div class="race-line">${escapeHtml(def.race)}</div>`;
+}
+// カードの「種類・タイプ・ステータス」をまとめた1行(ゾーン確認モーダル等、簡潔な表示が必要な場面用)
+function cardTypeSummary(defName) {
+  const def = CARD_DEFS[defName];
+  if (!def) return "";
+  const parts = [];
+  if (def.race) parts.push(def.race);
+  parts.push(def.type ?? "");
+  if (def.type === CARD_TYPES.MONSTER) parts.push(`${def.atk}/${def.hp}`);
+  if (def.cost != null) parts.push(`コスト${def.cost}`);
+  return parts.filter(Boolean).join(" ・ ");
+}
 function costHtml(cost, originalCost) {
   // originalCostが渡され、costより高い場合は神の啓示等によるコスト減少を可視化する
   if (originalCost != null && cost != null && originalCost > cost) {
@@ -1251,7 +1292,7 @@ function renderHand(role) {
       el.className = "card " + cardTierClass(def);
       const marked = mulliganReturn.has(c.uid);
       if (marked) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
+      el.innerHTML = `${raceLineHtml(c.defName)}<div class="name">${c.defName}${marked ? "(戻す)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === CARD_TYPES.MONSTER ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
       if (!done) {
         el.onclick = () => {
           if (marked) mulliganReturn.delete(c.uid);
@@ -1274,7 +1315,7 @@ function renderHand(role) {
       el.className = "card " + cardTierClass(def);
       const chosen = keepSelection.chosenUid === c.uid;
       if (chosen) el.classList.add("selected");
-      el.innerHTML = `<div class="name">${c.defName}</div><div class="stat-line">コスト${costHtml(def?.cost)}</div>${cardEffectTooltipHtml(c.defName)}`;
+      el.innerHTML = `${raceLineHtml(c.defName)}<div class="name">${c.defName}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === CARD_TYPES.MONSTER ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
       el.onclick = () => {
         keepSelection.chosenUid = chosen ? null : c.uid;
         render();
@@ -1282,10 +1323,11 @@ function renderHand(role) {
       container.appendChild(el);
     }
     for (const c of player.hand.filter((h) => h.hold)) {
+      const def = CARD_DEFS[c.defName];
       const el = document.createElement("div");
       el.className = "card";
       el.style.opacity = "0.6";
-      el.innerHTML = `<div class="name">${c.defName} (保留・自動で残る)</div>`;
+      el.innerHTML = `${raceLineHtml(c.defName)}<div class="name">${c.defName} (保留・自動で残る)</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === CARD_TYPES.MONSTER ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
       container.appendChild(el);
     }
     return;
@@ -1297,7 +1339,7 @@ function renderHand(role) {
     const el = document.createElement("div");
     el.className = "card " + cardTierClass(def);
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
-    el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(effectiveCost, def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
+    el.innerHTML = `${raceLineHtml(c.defName)}<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(effectiveCost, def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
 
     if (isMyAction) {
       el.onclick = () => {
@@ -1363,9 +1405,19 @@ function openZoneModal(playerId, zoneKey) {
   if (counts.size === 0) {
     contentEl.innerHTML = "<div>(空)</div>";
   } else {
+    // 名前だけの一覧では種類・ステータス・効果が分からず選びにくいとのフィードバックを受け、
+    // 手札等と同じ情報量(種類・タイプ・ステータス・効果文)を1枚ずつ表示する形に変更(2026/08/14)
     for (const [name, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const def = CARD_DEFS[name];
       const row = document.createElement("div");
-      row.textContent = count > 1 ? `${name} ×${count}` : name;
+      row.className = "zone-modal-card";
+      row.innerHTML = `
+        <div class="zone-modal-card-head">
+          <span class="zone-modal-card-name">${escapeHtml(name)}${count > 1 ? ` ×${count}` : ""}</span>
+        </div>
+        <div class="zone-modal-card-meta">${escapeHtml(cardTypeSummary(name))}</div>
+        ${def?.effect ? `<div class="zone-modal-card-effect">${escapeHtml(def.effect)}</div>` : ""}
+      `;
       contentEl.appendChild(row);
     }
   }
