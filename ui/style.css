@@ -394,6 +394,26 @@ main {
 .card:hover .card-effect-tooltip {
   opacity: 1;
 }
+/* 場(board-row)のツールチップ位置調整(2026/08/14修正: 左端のカードで手札と重なって
+   効果文が読めなくなっていた不具合の対応)。
+   ①相手の場(mirrored)は真上に相手の手札(hand-row)があるため、上向きに表示すると
+   　必ず手札の上に重なって隠れてしまう。相手側だけ下向き表示に切り替える
+   ②中央揃え(left:50%)のままだと、一番左・一番右のカードでは吹き出しが画面端や
+   　隣接パネル(左列のシールド/超越/ストレージ等)からはみ出しやすいため、
+   　両端のカード(data-slot="0"/"3")だけ左揃え・右揃えに変更する */
+.board-layout.mirrored .board-row .card-effect-tooltip {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+.board-row [data-slot="0"] .card-effect-tooltip {
+  left: 0;
+  transform: none;
+}
+.board-row [data-slot="3"] .card-effect-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
 
 .controls {
   display: flex;
