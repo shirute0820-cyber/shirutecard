@@ -36,6 +36,7 @@ function serializeMonster(m) {
     onceEffectUsedThisTurn: m.onceEffectUsedThisTurn ?? {},
     tempAtkThisTurn: m.tempAtkThisTurn ?? 0,
     tempHpThisTurn: m.tempHpThisTurn ?? 0,
+    usedDoubleAttackThisTurn: m.usedDoubleAttackThisTurn ?? false,
   };
 }
 
@@ -51,11 +52,12 @@ function deserializeMonster(o) {
     onceEffectUsedThisTurn: o.onceEffectUsedThisTurn ?? {},
     tempAtkThisTurn: o.tempAtkThisTurn ?? 0,
     tempHpThisTurn: o.tempHpThisTurn ?? 0,
+    usedDoubleAttackThisTurn: o.usedDoubleAttackThisTurn ?? false,
   };
 }
 
 function serializeHandCard(c) {
-  return { uid: c.uid, defName: c.defName, hold: !!c.hold };
+  return { uid: c.uid, defName: c.defName, hold: !!c.hold, costReduction: c.costReduction ?? 0 };
 }
 
 // 盤面はスパース(歯抜け)なオブジェクトとして保存する。
@@ -101,6 +103,7 @@ function serializePlayer(p) {
     exile: [...p.exile],
     secondPlayerBonusDrawsRemaining: p.secondPlayerBonusDrawsRemaining,
     secondPlayerBonusDrawUsedThisTurn: p.secondPlayerBonusDrawUsedThisTurn,
+    pendingCostReduction: p.pendingCostReduction ?? null, // 神の啓示の予約情報
   };
 }
 
@@ -110,12 +113,13 @@ function deserializePlayer(o) {
   return {
     ...o,
     deck: o.deck ?? [],
-    hand: (o.hand ?? []).map((c) => ({ ...c })),
+    hand: (o.hand ?? []).map((c) => ({ ...c, costReduction: c.costReduction ?? 0 })),
     storage: o.storage ?? [],
     graveyard: o.graveyard ?? [],
     exile: o.exile ?? [],
     eventZone: o.eventZone ?? null,
     board: deserializeBoard(o.board),
+    pendingCostReduction: o.pendingCostReduction ?? null,
   };
 }
 
