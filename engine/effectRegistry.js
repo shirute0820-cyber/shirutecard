@@ -26,8 +26,24 @@ export const EFFECTS = {
     },
   },
   やり直し: {
-    onEvent({ game, player }) {
-      game.drawOne(player);
+    // 2026/08 改訂: 「1ドロー」から「手札2枚をストレージに移してから2ドロー」に変更。
+    // 対象の2枚はplayEvent側でまだ手札から取り除かれていない(このカード自身も含む)ため、
+    // 自分自身(selfHandUid)は候補から除外する。手札(自分自身を除く)が2枚以下のときは
+    // 選択の余地がないため自動的に全部ストレージへ移す(用意周到等と同じ考え方)。
+    onEvent({ game, player, params, selfHandUid }) {
+      const poolUids = player.hand.filter((c) => c.uid !== selfHandUid).map((c) => c.uid);
+      const targetUids =
+        params.discardHandUids && params.discardHandUids.length > 0
+          ? params.discardHandUids.filter((uid) => poolUids.includes(uid))
+          : poolUids;
+      for (const uid of targetUids) {
+        const idx = player.hand.findIndex((c) => c.uid === uid);
+        if (idx !== -1) {
+          const [card] = player.hand.splice(idx, 1);
+          player.storage.push(card.defName);
+        }
+      }
+      game.forceDraw(player, 2);
     },
   },
   祈り: {
@@ -65,6 +81,14 @@ export const EFFECTS = {
     onTranscend({ game, opponent, params }) {
       const target = params.targetMonster ?? opponent.board.find(Boolean);
       if (target) game.destroyMonster(opponent, target);
+    },
+  },
+  // 2026/08 追加: 「①相手の場にモンスターが存在しないとき、これは【速攻】を持つ」。
+  // 固定付与ではなく、参照するたびに再判定する条件付きキーワードのため、
+  // grantedKeywordsではなくconditionalKeywordフック(hasKeyword側で都度評価)で実装する。
+  死神: {
+    conditionalKeyword({ opponent }) {
+      return opponent.board.some(Boolean) ? [] : [KEYWORDS.SOKKOU];
     },
   },
 
@@ -225,6 +249,53 @@ export const EFFECTS = {
   ブルードラゴン: {
     onSummon({ game, opponent }) {
       game.dealDamageToAllEnemyMonsters(opponent, 8);
+    },
+  },
+  // 2026/08 追加: 初の「持続イベント(イベントゾーン設置型)」カード。
+  // ①手札のドラゴン種のコスト-1 → zoneHandCostReduction(コスト計算のたびに動的評価、GameState.getEffectiveHandCost経由)
+  // ②自分の場のドラゴン・亜竜+4/+4 → イベントゾーンに設置された瞬間(onZoneEnter)に既存の対象へ、
+  //    以後の召喚のたびに(onZoneSummon)新規の対象へ、それぞれ実際にcurrentAtk/currentHpへ加算する方式。
+  //    (このゲームにはアタック値のような「実効値オーバーレイ」の仕組みがHPには無いため、天啓の聖女ジャンヌ・ダルクの
+  //    オーラのような常時計算方式ではなく、他の恒久バフ効果と同じ直接加算方式を採用。
+  //    このカードがイベントゾーンを離れるとき(onZoneLeave)に、付与した分を正確に巻き戻す)
+  // ③自分の元コスト6以上のドラゴンが戦闘で破壊されるとき、竜の里自身を墓地へ送ることで破壊を無効化する。
+  //    「できる」効果だが、竜の里を温存するより大型ドラゴンを守る方が基本的に得なため、
+  //    現状は条件を満たせば自動的に無効化する簡易実装にしている(プレイヤーが選べるようにする場合は要相談)。
+  竜の里: {
+    zoneHandCostReduction({ def }) {
+      return def.race === "ドラゴン" ? 1 : 0;
+    },
+    onZoneEnter({ player }) {
+      for (const m of player.board) {
+        if (m && (m.race === "ドラゴン" || m.race === "亜竜")) {
+          m.currentAtk += 4;
+          m.currentHp += 4;
+          m.ryuunoSatoBuffed = true;
+        }
+      }
+    },
+    onZoneSummon({ instance }) {
+      if (instance.race === "ドラゴン" || instance.race === "亜竜") {
+        instance.currentAtk += 4;
+        instance.currentHp += 4;
+        instance.ryuunoSatoBuffed = true;
+      }
+    },
+    onZoneLeave({ game, player, protectedInstance }) {
+      for (const m of player.board) {
+        if (m && m.ryuunoSatoBuffed) {
+          m.currentAtk -= 4;
+          m.currentHp -= 4;
+          delete m.ryuunoSatoBuffed;
+          if (m !== protectedInstance && m.currentHp <= 0) game.sendToGraveyard(player, m);
+        }
+      }
+    },
+    preventCombatDestruction({ game, player, instance }) {
+      const def = CARD_DEFS[instance.defName];
+      if (!def || def.race !== "ドラゴン" || (def.cost ?? 0) < 6) return false;
+      game.destroyEventZoneCard(player.id, "戦闘による破壊を無効化するため自ら", instance);
+      return true;
     },
   },
   クロデカス・ワイバーン: {
