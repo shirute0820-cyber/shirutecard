@@ -101,8 +101,8 @@ function serializePlayer(p) {
     resourceAvailable: p.resourceAvailable,
     transcendCooldownUntilOwnTurn: p.transcendCooldownUntilOwnTurn,
     exile: [...p.exile],
-    secondPlayerBonusDrawsRemaining: p.secondPlayerBonusDrawsRemaining,
-    secondPlayerBonusDrawUsedThisTurn: p.secondPlayerBonusDrawUsedThisTurn,
+    secondPlayerBonusCostRemaining: p.secondPlayerBonusCostRemaining,
+    secondPlayerBonusCostUsedThisTurn: p.secondPlayerBonusCostUsedThisTurn,
     pendingCostReduction: p.pendingCostReduction ?? null, // 神の啓示の予約情報
   };
 }
@@ -120,6 +120,8 @@ function deserializePlayer(o) {
     eventZone: o.eventZone ?? null,
     board: deserializeBoard(o.board),
     pendingCostReduction: o.pendingCostReduction ?? null,
+    secondPlayerBonusCostRemaining: o.secondPlayerBonusCostRemaining ?? 2,
+    secondPlayerBonusCostUsedThisTurn: o.secondPlayerBonusCostUsedThisTurn ?? false,
   };
 }
 
