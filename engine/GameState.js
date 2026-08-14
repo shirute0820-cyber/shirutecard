@@ -33,8 +33,10 @@ function createPlayer(id, deckList) {
     resourceCap: 0,
     resourceAvailable: 0,
     transcendCooldownUntilOwnTurn: 0, // 自分の「自ターン数」基準でのクールダウン(グローバル/ラウンドとは無関係)
-    secondPlayerBonusDrawsRemaining: 2, // 後攻補正②(合計2回、ただし1ターンに1回まで)
-    secondPlayerBonusDrawUsedThisTurn: false,
+    // 後攻補正②(2026/08/14変更): 追加ドロー2回制から、エクストラコスト2回制に変更。
+    // 「そのターンだけ使えるコストを1回復する(ターン上限は超えない)」権利を、合計2回・1ターンに1回まで使える
+    secondPlayerBonusCostRemaining: 2,
+    secondPlayerBonusCostUsedThisTurn: false,
     // 神の啓示: デッキの一番上に置いたカードが「次の自ターン」にドローされた場合のみ
     // コスト減少を適用するための予約情報。{defName, ownTurnCount, amount} | null
     // ドローされないままそのターンが終わると消滅する(endTurn()で破棄)。
@@ -196,7 +198,7 @@ export class GameState {
     // シールドは自ターン開始時に0
     player.shield = 0;
     this.dragonKilledThisTurnByCombat = false;
-    player.secondPlayerBonusDrawUsedThisTurn = false;
+    player.secondPlayerBonusCostUsedThisTurn = false;
 
     // ドローフェイズ
     this.phase = "draw";
@@ -362,16 +364,20 @@ export class GameState {
     return true;
   }
 
-  // 後攻補正②：対戦中合計2回まで追加ドロー可能。ただし同じターンに2回はできない(別のターンで1回ずつ)
-  useSecondPlayerBonusDraw(playerId) {
+  // 後攻補正②：対戦中合計2回まで、そのターンだけ使えるコストを1回復できる。
+  // ただし同じターンに2回はできない(別のターンで1回ずつ)。ターンのコスト上限は超えない
+  // (2026/08/14変更: 追加ドロー2回制から、エクストラコスト2回制に変更)
+  useSecondPlayerBonusCost(playerId) {
     if (playerId !== this.secondPlayerId) throw new Error("先攻はこの権利を持たない");
     const player = this.players[playerId];
-    if (player.secondPlayerBonusDrawsRemaining <= 0) throw new Error("追加ドローの権利を使い切っています");
-    if (player.secondPlayerBonusDrawUsedThisTurn) throw new Error("このターンは既に使用しています(別のターンで使ってください)");
-    player.secondPlayerBonusDrawsRemaining -= 1;
-    player.secondPlayerBonusDrawUsedThisTurn = true;
-    this.drawOne(player);
-    this.log(`${playerId}: 後攻補正の追加ドローを使用(残り${player.secondPlayerBonusDrawsRemaining}回)`);
+    if (player.secondPlayerBonusCostRemaining <= 0) throw new Error("エクストラコストの権利を使い切っています");
+    if (player.secondPlayerBonusCostUsedThisTurn) throw new Error("このターンは既に使用しています(別のターンで使ってください)");
+    player.secondPlayerBonusCostRemaining -= 1;
+    player.secondPlayerBonusCostUsedThisTurn = true;
+    player.resourceAvailable = Math.min(player.resourceAvailable + 1, player.resourceCap);
+    this.log(
+      `${playerId}: 後攻補正のエクストラコストを使用(残り${player.secondPlayerBonusCostRemaining}回) 使えるコスト${player.resourceAvailable}/${player.resourceCap}`
+    );
   }
 
   // ---------------- 召喚 ----------------
@@ -496,8 +502,19 @@ export class GameState {
 
   // ---------------- 超越 ----------------
 
+  // 超越が解禁されるグローバルターン数(2026/08/14変更: 「4ターン目以降」から
+  // 「4ターン目の後攻から」に変更)。
+  // ターン数は先攻の行動開始時にのみ進むため、turnNumber=4の期間は必ず
+  // 「先攻の4ターン目→後攻の4ターン目」の順で訪れる。後攻はturnNumber=4の
+  // 時点(=自分の4ターン目)でそのまま解禁でよいが、先攻はまだ後攻の4ターン目が
+  // 来ていないため、先攻側だけ閾値を+1(=5ターン目から)にすることで、
+  // 結果的に「後攻の4ターン目以降」だけが解禁されるようにする。
+  transcendMinTurnFor(playerId) {
+    return playerId === this.secondPlayerId ? CONFIG.TRANSCEND_MIN_TURN : CONFIG.TRANSCEND_MIN_TURN + 1;
+  }
+
   canTranscend(playerId, instance) {
-    if (this.turnNumber < CONFIG.TRANSCEND_MIN_TURN) return false;
+    if (this.turnNumber < this.transcendMinTurnFor(playerId)) return false;
     if (instance.transcended) return false;
     const player = this.players[playerId];
     if (player.ownTurnCount < player.transcendCooldownUntilOwnTurn) return false;
@@ -511,7 +528,7 @@ export class GameState {
   transcendStatus(playerId, instance) {
     if (instance.transcended) return { usedUp: true, available: false, turnsLeft: null };
     const player = this.players[playerId];
-    const turnGate = Math.max(0, CONFIG.TRANSCEND_MIN_TURN - this.turnNumber);
+    const turnGate = Math.max(0, this.transcendMinTurnFor(playerId) - this.turnNumber);
     const cooldownGate = Math.max(0, player.transcendCooldownUntilOwnTurn - player.ownTurnCount);
     const turnsLeft = Math.max(turnGate, cooldownGate);
     return { usedUp: false, available: turnsLeft === 0, turnsLeft };
@@ -523,7 +540,7 @@ export class GameState {
   // (盤面左列に常設する「超越」ステータス表示用。対象モンスターがまだ1体もいなくても表示できる)
   playerTranscendAvailability(playerId) {
     const player = this.players[playerId];
-    const turnGate = Math.max(0, CONFIG.TRANSCEND_MIN_TURN - this.turnNumber);
+    const turnGate = Math.max(0, this.transcendMinTurnFor(playerId) - this.turnNumber);
     const cooldownGate = Math.max(0, player.transcendCooldownUntilOwnTurn - player.ownTurnCount);
     const turnsLeft = Math.max(turnGate, cooldownGate);
     return { available: turnsLeft === 0, turnsLeft };
