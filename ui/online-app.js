@@ -1462,14 +1462,14 @@ function renderStats(role) {
     const canUse =
       game.gameStarted &&
       game.activePlayerId === myPlayerId &&
-      player.secondPlayerBonusDrawsRemaining > 0 &&
-      !player.secondPlayerBonusDrawUsedThisTurn;
+      player.secondPlayerBonusCostRemaining > 0 &&
+      !player.secondPlayerBonusCostUsedThisTurn;
     const btn = document.createElement("button");
-    btn.textContent = `後攻追加ドローを使う(残り${player.secondPlayerBonusDrawsRemaining}回)`;
+    btn.textContent = `後攻エクストラコストを使う(残り${player.secondPlayerBonusCostRemaining}回)`;
     btn.disabled = !canUse;
     btn.onclick = async () => {
       try {
-        game.useSecondPlayerBonusDraw(myPlayerId);
+        game.useSecondPlayerBonusCost(myPlayerId);
         await pushState();
       } catch (err) {
         alert(err.message);
