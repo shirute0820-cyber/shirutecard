@@ -860,6 +860,14 @@ Object.assign(PARAM_BUILDERS, {
         pick.from === "board" ? { from: "board", instance: pick.instance } : { from: "hand", handUid: pick.handUid },
     };
   },
+  // 以前はPARAM_BUILDERSに未登録で、常にstorage[0]が自動選択されてしまい
+  // プレイヤーが対象を選べないバグがあった
+  神の啓示: async ({ player }) => {
+    if (player.storage.length === 0) return null; // 発動条件を満たさない
+    const chosen = await pickCardName(player.storage, "デッキの一番上に置くカード(次の自ターン、コスト-3)");
+    if (chosen === CANCELLED || !chosen) return null;
+    return { fetchDefName: chosen };
+  },
 });
 
 const TRANSCEND_PARAM_BUILDERS = {
@@ -976,7 +984,11 @@ function cardEffectTooltipHtml(defName) {
   if (!def?.effect) return "";
   return `<div class="card-effect-tooltip">${escapeHtml(def.effect)}</div>`;
 }
-function costHtml(cost) {
+function costHtml(cost, originalCost) {
+  // originalCostが渡され、costより高い場合は神の啓示等によるコスト減少を可視化する
+  if (originalCost != null && cost != null && originalCost > cost) {
+    return `<span class="cost-num cost-reduced"><s>${originalCost}</s> ${cost}</span>`;
+  }
   return `<span class="cost-num">${cost ?? "?"}</span>`;
 }
 
@@ -1281,10 +1293,11 @@ function renderHand(role) {
 
   for (const c of player.hand) {
     const def = CARD_DEFS[c.defName];
+    const effectiveCost = def?.cost != null ? Math.max(0, def.cost - (c.costReduction || 0)) : def?.cost;
     const el = document.createElement("div");
     el.className = "card " + cardTierClass(def);
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
-    el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
+    el.innerHTML = `<div class="name">${c.defName}${c.hold ? " (保留)" : ""}</div><div class="stat-line">コスト${costHtml(effectiveCost, def?.cost)} ${def?.type ?? ""}</div>${def?.type === "モンスター" ? `<div class="stat-line">${def.atk}/${def.hp}</div>` : ""}${cardEffectTooltipHtml(c.defName)}`;
 
     if (isMyAction) {
       el.onclick = () => {
