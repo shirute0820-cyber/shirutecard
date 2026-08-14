@@ -29,7 +29,7 @@ import {
 // ブラウザキャッシュが残っている)のか、更新後の新しい不具合なのかを
 // 見分けやすくするための目印。コードを変更するたびに、この値を更新すること。
 // ==========================================================
-const APP_VERSION = "2026-08-14.2";
+const APP_VERSION = "2026-08-14.4";
 document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`;
 
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
@@ -195,7 +195,7 @@ function renderDeckBuilder() {
     const n = deckBuilderDraft[def.name] ?? 0;
     const limit = copyLimitOf(def.name);
     const el = document.createElement("div");
-    el.className = `deck-card theme-${def.theme ?? ""} ${cardTierClass(def)}`;
+    el.className = `deck-card ${def.theme && def.theme !== "汎用" ? "is-theme" : ""} ${cardTierClass(def)}`;
     el.innerHTML = `
       <div class="name">${def.name}</div>
       <div class="meta">コスト${costHtml(def.cost)} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
