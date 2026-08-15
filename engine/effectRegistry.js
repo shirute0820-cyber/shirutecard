@@ -3,7 +3,7 @@ import { KEYWORDS, CONFIG } from "./constants.js";
 // カード名をキーに、フックを登録する。
 // onSummon({game, player, instance, params})    … 場に出たとき
 // onTranscend({game, player, instance, params}) … 超越の追加効果(基本効果に加えて発動)
-// onLeaveField({game, player, instance})        … 場を離れたとき(墓地送りになった直後)
+// onLeaveField({game, player, opponent, instance})        … 場を離れたとき(墓地送りになった直後)
 // onEvent({game, player, opponent, params})     … イベントカード発動時
 // onOwnEndPhase({game, player, instance})       … 自分のエンドフェイズ時、場にいる限り毎ターン判定
 // onKillInCombat({game, player, opponent, instance}) … このカードが攻撃側として敵を戦闘で破壊したとき
@@ -813,20 +813,19 @@ export const EFFECTS = {
   },
   // ①相手の場2つを毒化(onSummon)。以降そのスロットに召喚されたモンスターへの自動毒付与は
   // GameState.applyPoisonedSlotEntry()側(summonFromHand/specialSummonToken双方から呼ばれる)で処理。
-  // ②このカードが墓地に送られたとき、場のモンスター1体に毒16。
-  //   【要検討】このカードは戦闘等どのタイミングでも墓地へ送られうるため、破壊された瞬間に
-  //   プレイヤーへ対象選択を求めるUIフローが現状の設計にはない(onLeaveFieldはparamsを
-  //   受け取らない)。当面は「対象候補が複数いる場合は先頭を自動選択」という他カードと
-  //   同様の簡易実装にしており、選択制にする場合は別途相談のこと。
+  // ②このカードが墓地に送られたとき、場に存在するモンスターすべてに毒12を付与する
+  // (2026/08/16修正: 当初「1体選んで毒16」だったが、対象選択がどのタイミングでも
+  // 墓地送りになりうるカードと相性が悪かったため、対象選択不要な「全体に毒12」へ
+  // shirute側で仕様変更。これにより対象選択UIの実装は不要になった)
   ドクター・ベアトラップ: {
     onSummon({ game, opponent, params }) {
       const slots = (params?.poisonSlots ?? [0, 1]).slice(0, 2);
       for (const s of slots) opponent.poisonedSlots.add(s);
       game.log(`${opponent.id}: 場の${slots.join(",")}番枠が毒化された(以降このスロットに召喚されたモンスターへ毒8)`);
     },
-    onLeaveField({ game, player }) {
-      const target = player.board.find(Boolean) ?? null;
-      if (target) game.applyPoisonToMonster(player, target, 16);
+    onLeaveField({ game, player, opponent }) {
+      for (const m of [...player.board]) if (m) game.applyPoisonToMonster(player, m, 12);
+      for (const m of [...opponent.board]) if (m) game.applyPoisonToMonster(opponent, m, 12);
     },
   },
   ドクター・ポイズン: {
