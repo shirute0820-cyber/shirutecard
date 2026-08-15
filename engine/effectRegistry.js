@@ -311,9 +311,11 @@ export const EFFECTS = {
     },
   },
   デスラトル: {
+    // 2026/08改訂: 「亜竜種2体を墓地へ送って2体に16ダメージ」から
+    // 「亜竜種1体を墓地へ送って2体に12ダメージ」に変更
     onEvent({ game, player, opponent, params }) {
-      const chosen = params.sacrifices; // [{from:'board'|'hand', ref}] を2つ渡す想定
-      if (!chosen || chosen.length !== 2) throw new Error("場・手札から亜竜種2体を指定してください");
+      const chosen = params.sacrifices; // [{from:'board'|'hand', ref}] を1つ渡す想定
+      if (!chosen || chosen.length !== 1) throw new Error("場・手札から亜竜種1体を指定してください");
 
       // 相手の場にモンスターが0体なら、そもそも発動できない(コストだけ支払わされることを防ぐため
       // 対象確認はコスト消費より先に行う)
@@ -333,7 +335,7 @@ export const EFFECTS = {
           }
         }
       }
-      for (const t of targets) game.dealDamageToMonster(opponent, t, 16);
+      for (const t of targets) game.dealDamageToMonster(opponent, t, 12);
     },
   },
   オルレアホワイト・ドラゴン: {
@@ -381,6 +383,7 @@ export const EFFECTS = {
         migi.currentAtk += 8;
         migi.currentHp += 4;
         migi.grantedKeywords.add(KEYWORDS.TOTSUGEKI);
+        migi.grantedKeywords.add(KEYWORDS.KAKUSATSU);
       }
     },
     onLeaveField({ game, player }) {
@@ -389,10 +392,14 @@ export const EFFECTS = {
     },
   },
   ダリアバーミリオン・ドラゴン: {
-    onSummon({ game, player, opponent, params }) {
+    onSummon({ game, player, opponent, instance, params }) {
       const target = params.targetMonster ?? opponent.board.find(Boolean);
       if (target) game.dealDamageToMonster(opponent, target, 24);
       game.grantKeywordToOwnRaces(player, ["亜竜"], KEYWORDS.SOKKOU);
+      // ①効果で墓地に送った『レッドドラゴン』が超越していたとき、このカードは超越する
+      if (params.releasedInstance?.transcended) {
+        game.forceTranscend(player.id, instance);
+      }
     },
     // 「超越したターンから、この効果は有効となる。自分のエンドフェイズ時、相手プレイヤーに
     // 20ダメージ与える」= 超越した以降、毎エンドフェイズ継続的に発動する(1回きりではない)。
@@ -405,8 +412,12 @@ export const EFFECTS = {
     },
   },
   デルフィニウムアズール・ドラゴン: {
-    onSummon({ game, player, opponent, params }) {
+    onSummon({ game, player, opponent, instance, params }) {
       game.dealDamageToAllEnemyMonsters(opponent, 12);
+      // ①効果で墓地に送った『ブルードラゴン』が超越していたとき、このカードは超越する
+      if (params?.releasedInstance?.transcended) {
+        game.forceTranscend(player.id, instance);
+      }
       const eligible = player.graveyard.filter((n) => CARD_DEF_RACE(n) === "亜竜");
       if (eligible.length === 0) return;
       // 詳しい説明文:「墓地に存在する亜竜種を1体選び」= 複数いる場合はプレイヤーが選ぶ
@@ -450,7 +461,7 @@ export const EFFECTS = {
       }
     },
     onTranscend({ game, player }) {
-      game.buffOwnRace(player, "亜竜", 8, 4);
+      game.buffOwnRace(player, "亜竜", 8, 8);
       game.grantKeywordToOwnRaces(player, ["亜竜"], KEYWORDS.CHOUHATSU);
     },
   },
@@ -470,10 +481,10 @@ export const EFFECTS = {
         game.log(`${player.id}: ドラゴニュート・キングが撃破ボーナスでもう一度攻撃可能に`);
       }
       // ≪超越≫したターンから有効になる、①とは別枠の効果:
-      // 敵を破壊したとき、相手に8ダメージを与える(①の1ターン1度制限を消費しない)
+      // 敵を破壊したとき、相手に12ダメージを与える(①の1ターン1度制限を消費しない)
       if (instance.transcended) {
-        game.dealDamageToPlayer(opponent, 8);
-        game.log(`${player.id}: ドラゴニュート・キングの超越効果で相手に8ダメージ`);
+        game.dealDamageToPlayer(opponent, 12);
+        game.log(`${player.id}: ドラゴニュート・キングの超越効果で相手に12ダメージ`);
       }
     },
   },
@@ -505,10 +516,10 @@ export const EFFECTS = {
     auraGiveAtk() {
       return 4;
     },
-    // 《超越》このカードは+12/+12され、1ターンに2回攻撃できるようになる。
-    // 効果文が明示的にステータス増加量を書いているため、通常の「ターン数×2(最大20)」の
-    // 計算式ではなく、固定+12/+12に置き換える(transcendStatBonusで上書き)
-    transcendStatBonus: 12,
+    // 《超越》1ターンに2回攻撃できるようになる。
+    // 2026/08改訂: 以前は独自の固定+12/+12(transcendStatBonus)を持たせていたが、
+    // 仕様上は他のモンスターと同じ「ターン数×2(最大20)」の通常計算式に統一されたため、
+    // 上書き設定を撤廃した(2回攻撃の追加効果のみ残す)。
     onAfterAttack({ instance }) {
       // 超越済みなら、1ターンに1度だけ「もう一度攻撃可能」状態に戻す
       if (instance.transcended && !instance.usedDoubleAttackThisTurn) {
