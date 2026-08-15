@@ -185,6 +185,22 @@ async function pickUpTo(names, max, label) {
   return chosen;
 }
 
+// 毒を付与する対象(場のモンスター1体、またはプレイヤー)を選ばせる汎用ピッカー
+// (2026/08/16トリッカーテーマ追加。毒滴・ポイズン・ラボ③で使用)。
+// includeSelfPlayer: 自分自身も対象候補に含めるか(毒滴は含めない=相手のみ、
+// ポイズン・ラボ③は含める=自分・相手どちらも選べる)。
+// 戻り値: { kind:'monster', instance, owner } | { kind:'player', player } | CANCELLED | null(候補無し)
+async function pickPoisonTarget(player, opponent, label, { includeSelfPlayer = false } = {}) {
+  const pool = [];
+  for (const m of player.board) if (m) pool.push({ kind: "monster", instance: m, owner: player, label: `[自分の場] ${m.defName}` });
+  for (const m of opponent.board) if (m) pool.push({ kind: "monster", instance: m, owner: opponent, label: `[相手の場] ${m.defName}` });
+  if (includeSelfPlayer) pool.push({ kind: "player", player, label: "自分自身" });
+  pool.push({ kind: "player", player: opponent, label: "相手プレイヤー" });
+  if (pool.length === 0) return null;
+  const pick = pool.length === 1 ? pool[0] : await pickFromList(pool, label, (p) => p.label);
+  return pick;
+}
+
 // PARAM_BUILDERSは、キャンセルされたらnullを返す(=カード発動自体を中断する合図)。
 // それ以外は通常通りparamsオブジェクトを返す。すべて非同期(モーダル待ち)。
 const PARAM_BUILDERS = {
@@ -366,6 +382,39 @@ const PARAM_BUILDERS = {
     if (chosen === CANCELLED || !chosen) return null;
     return { fetchDefName: chosen };
   },
+
+  // ---------- トリッカーテーマ(毒、2026/08/16追加) ----------
+  解毒爆薬剤: async ({ player, opponent }) => {
+    const pool = [...player.board.filter((m) => m && m.poison > 0), ...opponent.board.filter((m) => m && m.poison > 0)];
+    if (pool.length === 0) {
+      alert("毒が付与されているモンスターがいません");
+      return null;
+    }
+    const t = await pickMonster(pool, "毒を解除するモンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+  毒滴: async ({ player, opponent }) => {
+    const pick = await pickPoisonTarget(player, opponent, "毒8を付与する対象", { includeSelfPlayer: false });
+    if (pick === CANCELLED || !pick) return null;
+    if (pick.kind === "monster") return { target: { type: "monster", instance: pick.instance } };
+    return { target: { type: "player" } };
+  },
+  ドクター・ベアトラップ: async ({ opponent }) => {
+    const slots = [0, 1, 2, 3];
+    const chosen = [];
+    for (let i = 0; i < 2; i++) {
+      const pool = slots.filter((s) => !chosen.includes(s));
+      const pick = await pickFromList(
+        pool,
+        `毒化する相手の場(あと${2 - i}箇所)`,
+        (s) => (opponent.board[s] ? `${s}番枠(${opponent.board[s].defName})` : `${s}番枠(空き)`)
+      );
+      if (pick === CANCELLED) return null;
+      chosen.push(pick);
+    }
+    return { poisonSlots: chosen };
+  },
 };
 
 // 超越の追加効果で対象選択が必要なカード。効果文に「ランダム」と書かれていない
@@ -400,6 +449,37 @@ const ACTIVATE_PARAM_BUILDERS = {
       return null;
     }
     return { exileHandUid: c.uid };
+  },
+  ドクター・トキシン: async ({ player, opponent }) => {
+    const pool = [...player.board.filter(Boolean), ...opponent.board.filter(Boolean)];
+    if (pool.length === 0) {
+      alert("場にモンスターがいません");
+      return null;
+    }
+    const t = await pickMonster(pool, "毒8を付与するモンスター");
+    if (t === CANCELLED) return null;
+    return { targetMonster: t };
+  },
+};
+
+// 持続イベント(イベントゾーン設置カード)自身が持つ起動効果(onZoneActivate)用の
+// 対象選択ビルダー(2026/08/16トリッカーテーマ追加。ポイズン・ラボ③用)
+const ZONE_ACTIVATE_PARAM_BUILDERS = {
+  ポイズン・ラボ: async ({ player, opponent }) => {
+    const sacPool = player.board.filter((m) => m && m.race === "毒性生物");
+    if (sacPool.length === 0) {
+      alert("自分の場に「毒性生物」がいません");
+      return null;
+    }
+    const sac = await pickMonster(sacPool, "墓地へ送る「毒性生物」");
+    if (sac === CANCELLED) return null;
+    const pick = await pickPoisonTarget(player, opponent, "毒4を付与する対象", { includeSelfPlayer: true });
+    if (pick === CANCELLED || !pick) return null;
+    const target =
+      pick.kind === "monster"
+        ? { type: "monster", instance: pick.instance, owner: pick.owner }
+        : { type: "player", player: pick.player };
+    return { sacrificeMonster: sac, target };
   },
 };
 
@@ -524,6 +604,7 @@ function renderMonsterCard(playerId, instance, slot) {
     <div class="race-line">${instance.race ?? ""}</div>
     <div class="name monster-name">${instance.defName}</div>
     <div class="stat-line">${effAtk(instance)} / ${instance.currentHp}</div>
+    ${instance.poison > 0 ? `<div class="stat-line poison-line">毒${instance.poison}</div>` : ""}
     <div class="keywords">${kws.join(" ")}</div>
     ${cardEffectTooltipHtml(instance.defName)}
   `;
@@ -694,6 +775,31 @@ function renderBoard(playerId) {
         </div>
       `;
       eventZoneEl.classList.add("occupied");
+      // 持続イベント自身が持つ起動効果(ポイズン・ラボ③等。2026/08/16追加)
+      if (playerId === game.activePlayerId && !game.winner && game.canActivateZoneAbility(playerId)) {
+        const cardEl = eventZoneEl.querySelector(".event-zone-card");
+        const btn = document.createElement("button");
+        btn.className = "tr-btn";
+        btn.textContent = "起動効果を使う";
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          const player = game.players[playerId];
+          const opponent = game.players[game.opponentOf(playerId)];
+          const builder = ZONE_ACTIVATE_PARAM_BUILDERS[zoneDefName];
+          const params = builder ? await builder({ player, opponent }) : {};
+          if (params === null) {
+            render();
+            return;
+          }
+          try {
+            game.activateZoneAbility(playerId, params);
+          } catch (err) {
+            alert(err.message);
+          }
+          render();
+        };
+        cardEl.appendChild(btn);
+      }
     } else {
       eventZoneEl.innerHTML = `<div class="zone-label">イベント<br />ゾーン</div>`;
       eventZoneEl.classList.remove("occupied");
@@ -877,6 +983,7 @@ function renderStats(playerId) {
   el.innerHTML = `
     HP: <b>${player.hp}</b> ／
     コスト: <b>${player.resourceAvailable}/${player.resourceCap}</b>
+    ${player.poison > 0 ? ` ／ 毒: <b class="poison-value">${player.poison}</b>` : ""}
     ${
       player.id === game.secondPlayerId
         ? `<button id="bonus-cost-btn" ${
