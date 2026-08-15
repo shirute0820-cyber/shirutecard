@@ -238,6 +238,18 @@ const PARAM_BUILDERS = {
     }
     return { discardHandUids: chosen };
   },
+  タイフーン: async ({ player, selfUid }) => {
+    const pool = player.hand.filter(
+      (c) => c.uid !== selfUid && (CARD_DEFS[c.defName]?.type === CARD_TYPES.EVENT || CARD_DEFS[c.defName]?.type === CARD_TYPES.PERSISTENT_EVENT)
+    );
+    if (pool.length === 0) {
+      alert("墓地へ送れるイベントカードが手札にありません");
+      return null;
+    }
+    const c = pool.length === 1 ? pool[0] : await pickHandCard(pool, "墓地へ送るイベントカード");
+    if (c === CANCELLED) return null;
+    return { discardHandUid: c.uid };
+  },
   ドラゴンの血誓: async ({ player, selfUid }) => {
     const c = await pickHandCard(
       player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"),
@@ -761,7 +773,10 @@ function renderHand(playerId) {
 
   for (const c of player.hand) {
     const def = CARD_DEFS[c.defName];
-    const effectiveCost = def?.cost != null ? Math.max(0, def.cost - (c.costReduction || 0)) : def?.cost;
+    // 神の啓示のcostReductionに加え、竜の里のような「イベントゾーンにいる間の動的な
+    // コスト軽減」も表示に反映する(2026/08/15: 竜の里追加で発覚した表示漏れの修正。
+    // 神の啓示のときと同じ「実際に払うコストと表示が食い違う」問題を再発させないための対応)
+    const effectiveCost = def?.cost != null ? game.getEffectiveHandCost(player, c, def) : def?.cost;
     const el = document.createElement("div");
     el.className = "card " + cardTierClass(def);
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
