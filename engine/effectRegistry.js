@@ -11,6 +11,23 @@ import { KEYWORDS, CONFIG } from "./constants.js";
 //   (summonedOnTurn/超越/イベントに紐付かない、プレイヤーが任意タイミングで発動するモンスター効果。
 //    1体につき1つを想定し、onceEffectUsedThisTurn.ability で毎ターン自動リセットされる)
 //
+// --- 2026/08/16 トリッカーテーマ(毒)追加分の新規フック ---
+// onCombat({game, player, opponent, instance, enemyInstance}) … 交戦時(攻撃側・防御側どちらでも)、
+//   通常のダメージ計算より前に発火。攻撃側・防御側の両方に対して個別に呼ばれる
+// onAfterAttack の params に targetType('player'|'monster') が追加された。直接攻撃かどうかで
+//   挙動を分けるカード(ミニタランチュラ・毒の探究者ゴゴ等)が利用する
+// onDrawCard({game, player, opponent, instance}) … このカードの持ち主が自分でカードを1枚
+//   ドローするたびに発火(ドクター・ポイズン③)
+// onPoisonChanged({game, player, instance, delta}) … このカード自身の毒の値が変化するたびに
+//   発火。常時計算で体力等に反映させたいカード用(デカめのサソリ②)
+// onZoneActivate({game, player, opponent, params}) … 持続イベント(イベントゾーン設置カード)
+//   自身が持つ、プレイヤーが任意タイミングで発動できる起動効果(ポイズン・ラボ③)
+// onAllySummon({game, player, instance, newInstance}) … 自分の場に新しいモンスターが
+//   召喚されるたびに発火。「自分が場にいる限り、新しく出た味方◯◯は+△/+□される」系の
+//   常時効果用(タランチュラ・クイーン②)
+// blocksDirectPlayerDamage: true … 相手プレイヤーへ直接攻撃してもHPを減らせない
+//   (シールドは通常通り消費できる。毒の探究者ゴゴ①)
+//
 // 新しいカードを追加するときは、ここに1エントリ足すだけでよく、
 // GameState.js 本体を書き換える必要はない。
 // params は summonFromHand / useTranscend / playEvent の呼び出し側から
@@ -619,6 +636,306 @@ export const EFFECTS = {
     },
     onTranscend({ game, opponent }) {
       game.dealDamageToPlayer(opponent, 20);
+    },
+  },
+
+  // ---------- トリッカーテーマ(毒、2026/08/16追加) ----------
+  解毒爆薬剤: {
+    onEvent({ game, player, opponent, params }) {
+      const target = params?.targetMonster;
+      const owner = target && player.board.includes(target) ? player
+        : target && opponent.board.includes(target) ? opponent
+        : null;
+      if (!owner || !(target.poison > 0)) throw new Error("毒が付与されているモンスターを指定してください");
+      const amount = target.poison;
+      game.setPoisonAmount(owner, target, 0);
+      game.dealDamageToMonster(owner, target, amount);
+    },
+  },
+  ミニタランチュラ: {
+    onSummon({ game, player }) {
+      const slot = game.findEmptySlot(player);
+      if (slot === -1) return;
+      // specialSummonToken()はonSummonフックを再発火させないため、これ以上連鎖しない
+      game.specialSummonToken(player.id, "ミニタランチュラ", slot);
+    },
+    onAfterAttack({ game, opponent, targetType }) {
+      if (targetType === "player") game.applyPoisonToPlayer(opponent, 4);
+    },
+  },
+  毒滴: {
+    onEvent({ game, player, opponent, params }) {
+      const target = params?.target; // {type:'monster', instance} | {type:'player'}
+      if (!target) throw new Error("毒を付与する対象を選んでください");
+      if (target.type === "monster") {
+        const owner = player.board.includes(target.instance) ? player
+          : opponent.board.includes(target.instance) ? opponent
+          : null;
+        if (!owner) throw new Error("場に存在するモンスターを指定してください");
+        game.applyPoisonToMonster(owner, target.instance, 8);
+      } else if (target.type === "player") {
+        game.applyPoisonToPlayer(opponent, 8);
+      } else {
+        throw new Error("不正な対象です");
+      }
+    },
+  },
+  毒食み: {
+    onEvent({ game, player }) {
+      game.applyPoisonToPlayer(player, 8);
+      player.resourceAvailable = Math.min(player.resourceAvailable + 2, player.resourceCap);
+    },
+  },
+  ドクトゲガエル: {
+    onCombat({ game, opponent, enemyInstance }) {
+      if (enemyInstance) game.applyPoisonToMonster(opponent, enemyInstance, 4);
+    },
+  },
+  // ①設置条件「自分の場に「科学者」がいるとき」はonEventで検証のみ行う(持続イベントの
+  //   設置と同時に発動する即時効果は無いため、onEvent自体は副作用を持たない)。
+  // ②の「毒の自動減少を止める」はGameState.isPoisonDecayDisabled()側で判定。
+  // ③は場のモンスター起動効果とは別枠の、イベントゾーンカード自身の起動効果(onZoneActivate)。
+  ポイズン・ラボ: {
+    onEvent({ player }) {
+      if (!player.board.some((m) => m && m.race === "科学者")) {
+        throw new Error("自分の場に「科学者」がいないと設置できません");
+      }
+    },
+    onZoneActivate({ game, player, opponent, params }) {
+      const sac = params?.sacrificeMonster;
+      if (!sac || !player.board.includes(sac) || sac.race !== "毒性生物") {
+        throw new Error("自分の場の「毒性生物」1体を選んでください");
+      }
+      const target = params?.target; // {type:'monster', instance, owner} | {type:'player', player}
+      if (!target) throw new Error("毒を付与する対象を選んでください");
+      game.sendToGraveyard(player, sac);
+      if (target.type === "monster") {
+        game.applyPoisonToMonster(target.owner, target.instance, 4);
+      } else if (target.type === "player") {
+        game.applyPoisonToPlayer(target.player, 4);
+      } else {
+        throw new Error("不正な対象です");
+      }
+    },
+  },
+  ハリマンボン: {
+    onTranscend({ game, player }) {
+      const spawned = [];
+      for (let i = 0; i < 2; i++) {
+        const slot = game.findEmptySlot(player);
+        if (slot === -1) break;
+        spawned.push(game.specialSummonToken(player.id, "ハリマンボン", slot));
+      }
+      for (const inst of spawned) {
+        inst.currentAtk += 8;
+        inst.currentHp += 8;
+      }
+    },
+  },
+  ドクター・トキシン: {
+    // 「1ターンに1度発動可能」= 既存のonActivate機構(onceEffectUsedThisTurn.abilityで
+    // 毎ターン自動リセット)をそのまま利用
+    onActivate({ game, player, opponent, params }) {
+      const target = params?.targetMonster;
+      const owner = target && player.board.includes(target) ? player
+        : target && opponent.board.includes(target) ? opponent
+        : null;
+      if (!owner) throw new Error("場に存在するモンスターを指定してください");
+      game.applyPoisonToMonster(owner, target, 8);
+    },
+  },
+  テトロドトキシンフィッシュ: {
+    onSummon({ game, opponent }) {
+      game.applyPoisonToAllEnemyMonsters(opponent, 8);
+    },
+  },
+  // 「毒が付与されている相手モンスターは攻撃できない」はGameState.isAttackBlockedByPoison()側で
+  // 一括判定しているため、ここには実装不要(忠義の騎士ジル・ド・レェの耐性と同じ設計方針)
+  ドクター・ニューロトキシン: {
+    onTranscend({ game, opponent }) {
+      game.applyPoisonToAllEnemyMonsters(opponent, 12);
+    },
+  },
+  デカめのサソリ: {
+    onCombat({ game, player, opponent, instance, enemyInstance }) {
+      if (enemyInstance) game.applyPoisonToMonster(opponent, enemyInstance, 8);
+      game.applyPoisonToMonster(player, instance, 8);
+    },
+    // ②毒の合計分体力が増加する(常時計算)。竜の里と同じ「直接加算方式」で、
+    // 毒が増減するたびにcurrentHpを連動させる(このゲームにはHPの実効値オーバーレイの
+    // 仕組みが無いため、他の恒久バフ効果と同じ方式に合わせている)
+    onPoisonChanged({ instance, delta }) {
+      instance.currentHp += delta;
+    },
+  },
+  阿毒叫喚: {
+    onEvent({ game, player, opponent }) {
+      for (const m of [...player.board]) if (m) game.applyPoisonToMonster(player, m, 20);
+      for (const m of [...opponent.board]) if (m) game.applyPoisonToMonster(opponent, m, 20);
+    },
+  },
+  ドクター・イミュニティ: {
+    onSummon({ game, player }) {
+      game.applyPoisonToPlayer(player, 16);
+    },
+    // ②交戦時、ダメージ計算前に自分の毒の合計分、交戦している敵モンスターにダメージを与える
+    onCombat({ game, opponent, enemyInstance, player }) {
+      if (enemyInstance) game.dealDamageToMonster(opponent, enemyInstance, player.poison || 0);
+    },
+    // ③自分のエンドフェイズ時、毒の合計分回復してから毒を0にする。
+    // このフックはendTurn()内で「毒のダメージ処理」より前に実行されるため、
+    // 結果的にそのターンの毒による自傷ダメージは発生しなくなる(意図通りの挙動)
+    onOwnEndPhase({ game, player }) {
+      const amount = player.poison || 0;
+      if (amount > 0) {
+        game.healPlayer(player, amount);
+        game.setPoisonAmount(player, player, 0);
+      }
+    },
+    onTranscend({ game, player }) {
+      game.setPoisonAmount(player, player, (player.poison || 0) * 2);
+    },
+  },
+  毒の探究者ゴゴ: {
+    blocksDirectPlayerDamage: true,
+    onAfterAttack({ game, player, opponent, instance, targetType }) {
+      if (targetType !== "player") return;
+      const amount = instance.poison || 0;
+      if (amount > 0) {
+        game.applyPoisonToPlayer(opponent, amount);
+        game.setPoisonAmount(player, instance, 0);
+      }
+    },
+    onTranscend({ game, player, instance }) {
+      game.applyPoisonToMonster(player, instance, 8);
+      instance.grantedKeywords.add(KEYWORDS.SOKKOU);
+    },
+  },
+  // ①相手の場2つを毒化(onSummon)。以降そのスロットに召喚されたモンスターへの自動毒付与は
+  // GameState.applyPoisonedSlotEntry()側(summonFromHand/specialSummonToken双方から呼ばれる)で処理。
+  // ②このカードが墓地に送られたとき、場のモンスター1体に毒16。
+  //   【要検討】このカードは戦闘等どのタイミングでも墓地へ送られうるため、破壊された瞬間に
+  //   プレイヤーへ対象選択を求めるUIフローが現状の設計にはない(onLeaveFieldはparamsを
+  //   受け取らない)。当面は「対象候補が複数いる場合は先頭を自動選択」という他カードと
+  //   同様の簡易実装にしており、選択制にする場合は別途相談のこと。
+  ドクター・ベアトラップ: {
+    onSummon({ game, opponent, params }) {
+      const slots = (params?.poisonSlots ?? [0, 1]).slice(0, 2);
+      for (const s of slots) opponent.poisonedSlots.add(s);
+      game.log(`${opponent.id}: 場の${slots.join(",")}番枠が毒化された(以降このスロットに召喚されたモンスターへ毒8)`);
+    },
+    onLeaveField({ game, player }) {
+      const target = player.board.find(Boolean) ?? null;
+      if (target) game.applyPoisonToMonster(player, target, 16);
+    },
+  },
+  ドクター・ポイズン: {
+    onSummon({ game, player, opponent }) {
+      for (const m of [...player.board]) if (m) game.applyPoisonToMonster(player, m, 30);
+      for (const m of [...opponent.board]) if (m) game.applyPoisonToMonster(opponent, m, 30);
+    },
+    // ②「敵の場のモンスターも毒ダメージを受ける」はGameState.endTurn()側でこのカードの
+    // 存在を直接チェックして処理している(自分のエンドフェイズという特殊なタイミングで
+    // 相手の場を処理する例外的な効果のため)
+    onDrawCard({ game, player, opponent }) {
+      for (const m of [...player.board]) if (m) game.applyPoisonToMonster(player, m, 8);
+      for (const m of [...opponent.board]) if (m) game.applyPoisonToMonster(opponent, m, 8);
+    },
+  },
+  "ヒュドラ―の分頭": {
+    onSummon({ instance }) {
+      const options = [KEYWORDS.TOTSUGEKI, KEYWORDS.CHOUHATSU, KEYWORDS.ONMITSU, KEYWORDS.KAKUSATSU];
+      const chosen = options[Math.floor(Math.random() * options.length)];
+      instance.grantedKeywords.add(chosen);
+    },
+    onCombat({ game, opponent, enemyInstance }) {
+      if (enemyInstance) game.applyPoisonToPlayer(opponent, 4);
+    },
+  },
+  "九頭竜ヒュドラ―": {
+    onAfterAttack({ game, opponent, instance }) {
+      // ①攻撃したとき(直接攻撃・モンスターへの攻撃を問わない)、相手の場全体に毒8
+      game.applyPoisonToAllEnemyMonsters(opponent, 8);
+      // ②1ターンに2回攻撃できる(超越条件なしの常時効果。ジャンヌ・ダルクの超越限定版とは異なり、
+      // 場にいる限り常に有効)
+      if (!instance.usedDoubleAttackThisTurn) {
+        instance.usedDoubleAttackThisTurn = true;
+        instance.hasAttackedThisTurn = false;
+      }
+    },
+    // ③墓地に送られるとき、自分の場に『ヒュドラ―の分頭』を最大3体特殊召喚する
+    onLeaveField({ game, player }) {
+      for (let i = 0; i < 3; i++) {
+        const slot = game.findEmptySlot(player);
+        if (slot === -1) break;
+        game.specialSummonToken(player.id, "ヒュドラ―の分頭", slot);
+      }
+    },
+  },
+  タランチュラベイビー: {
+    // 「破壊されたとき」= このゲームでは戦闘・効果いずれの理由でも墓地送りは
+    // sendToGraveyard()に一本化されているため、他カードの「場を離れたとき」系と同様に
+    // onLeaveFieldで実装する
+    onLeaveField({ game, player }) {
+      game.drawOne(player);
+    },
+  },
+  "タランチュラ・クイーン": {
+    onSummon({ game, player }) {
+      // ②の巻き戻し用マーキング: このクイーンが場に出た時点で既に存在する
+      // 『タランチュラベイビー』へ先にHP+8を直接付与しておく(このゲームにはHPの実効値
+      // オーバーレイの仕組みが無いため、竜の里と同じ直接加算方式)。
+      // ①のトークン生成より先に行うことで、新規に出す2体への二重付与を避ける
+      // (新規召喚分はonAllySummon側で1回だけ付与される)
+      for (const m of player.board) {
+        if (m && m.defName === "タランチュラベイビー" && !m.tarantulaQueenBuffed) {
+          m.currentHp += 8;
+          m.tarantulaQueenBuffed = true;
+        }
+      }
+      // ①場に出たとき、『タランチュラベイビー』2体を自分の場に出す。それは【突撃】を持つ
+      for (let i = 0; i < 2; i++) {
+        const slot = game.findEmptySlot(player);
+        if (slot === -1) break;
+        game.specialSummonToken(player.id, "タランチュラベイビー", slot, { grantedKeywords: [KEYWORDS.TOTSUGEKI] });
+      }
+    },
+    // このクイーンが場にいる間、新たに召喚された『タランチュラベイビー』にもHP+8を直接付与
+    onAllySummon({ newInstance }) {
+      if (newInstance.defName === "タランチュラベイビー" && !newInstance.tarantulaQueenBuffed) {
+        newInstance.currentHp += 8;
+        newInstance.tarantulaQueenBuffed = true;
+      }
+    },
+    // ②の攻撃力+4分は常時計算のオーラとして実装(このゲームのATKには実効値オーバーレイの
+    // 仕組みがあるため、HPと違って直接加算しなくてよい)。対象を『タランチュラベイビー』のみに絞る
+    auraGiveAtk({ target }) {
+      return target.defName === "タランチュラベイビー" ? 4 : 0;
+    },
+    onLeaveField({ game, player }) {
+      // このクイーンが場を離れるとき、直接加算していたHP+8分を巻き戻す(竜の里のonZoneLeaveと同じ考え方)
+      for (const m of player.board) {
+        if (m && m.tarantulaQueenBuffed) {
+          m.currentHp -= 8;
+          delete m.tarantulaQueenBuffed;
+          if (m.currentHp <= 0) game.sendToGraveyard(player, m);
+        }
+      }
+      // ③破壊されたとき『タランチュラベイビー』2体を自分の場に出す
+      for (let i = 0; i < 2; i++) {
+        const slot = game.findEmptySlot(player);
+        if (slot === -1) break;
+        game.specialSummonToken(player.id, "タランチュラベイビー", slot);
+      }
+    },
+    onTranscend({ game, player }) {
+      // 超越した瞬間の1回きりの恒久バフ(②の継続オーラ・直接加算とは別枠、デフォルトルール通り)
+      for (const m of player.board) {
+        if (m && m.defName === "タランチュラベイビー") {
+          m.currentAtk += 12;
+          m.currentHp += 8;
+        }
+      }
     },
   },
 };
