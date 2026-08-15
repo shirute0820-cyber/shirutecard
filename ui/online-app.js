@@ -4,6 +4,7 @@ import { CARD_DEFS } from "../engine/cardDefinitions.js";
 import { serializeGame, hydrateGame } from "../engine/serialization.js";
 import { flushUiEvents } from "./fx.js";
 import { setupRulesModal } from "./rules.js";
+import { setupPatchNotesModal } from "./patchNotes.js";
 import {
   DECK_SIZE,
   copyLimitOf,
@@ -36,6 +37,9 @@ document.getElementById("app-version-label").textContent = `Ver. ${APP_VERSION}`
 // ホーム画面・対戦画面、どちらの「ルール」ボタンも常設(動的に再生成されない)ため、
 // ここで一度だけ結びつけておけばよい
 setupRulesModal();
+
+// ホーム画面の「更新情報」ボタンも同様に、一度だけ結びつけておく
+setupPatchNotesModal();
 
 // ==========================================================
 // ログ(画面上の簡易ログパネル用)
