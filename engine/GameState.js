@@ -567,9 +567,11 @@ export class GameState {
       this.log(`${player.id}: 場のモンスターが0体になったためシールドをリセット`);
     }
 
-    // 連動破壊などのフック(例: ゴ・ド・リックの右腕)
+    // 連動破壊などのフック(例: ゴ・ド・リックの右腕)。opponent は2026/08/16追加
+    // (ドクター・ベアトラップ②「場に存在するモンスターすべて」のように、
+    //  自分の場だけでなく相手の場も参照するカードに対応するため)
     const hook = EFFECTS[instance.defName]?.onLeaveField;
-    if (hook) hook({ game: this, player, instance });
+    if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(player.id)], instance });
   }
 
   // ---------------- 超越 ----------------
