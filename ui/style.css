@@ -672,8 +672,80 @@ main {
 #rules-modal-content th { background: #262b34; }
 #rules-modal-content strong { color: var(--accent); }
 
-/* ホーム画面・対戦画面それぞれに置く「ルール」ボタン */
-.btn-open-rules {
+/* 更新情報(パッチノート)モーダル。構造・見た目はルールモーダルと揃えている */
+#patch-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#patch-modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(560px, 92vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#patch-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--panel);
+}
+#patch-modal-header button {
+  background: var(--accent);
+  border: none;
+  color: #1a1a1a;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#patch-modal-header .patch-modal-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+#patch-modal-content {
+  padding: 4px 16px 18px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+#patch-modal-content .patch-empty { margin: 16px 0; color: var(--muted); }
+#patch-modal-content .patch-day {
+  margin: 16px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid #22262e;
+}
+#patch-modal-content .patch-day:first-child { padding-top: 0; border-top: none; margin-top: 10px; }
+#patch-modal-content .patch-date {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--accent2);
+  margin: 0 0 8px;
+}
+#patch-modal-content .patch-card { margin: 0 0 10px 4px; }
+#patch-modal-content .patch-card-name {
+  font-weight: 700;
+  margin: 0 0 2px;
+}
+#patch-modal-content .patch-card ul { margin: 2px 0; padding-left: 20px; }
+#patch-modal-content .patch-card li { margin: 2px 0; }
+#patch-modal-content .patch-before { color: var(--muted); text-decoration: line-through; }
+#patch-modal-content .patch-after { color: var(--accent); font-weight: 600; }
+
+/* ホーム画面・対戦画面それぞれに置く「ルール」「更新情報」ボタン */
+.btn-open-rules, .btn-open-patchnotes {
   background: var(--accent2);
   border: none;
   color: #1a1a1a;
@@ -681,6 +753,19 @@ main {
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
+  position: relative;
+}
+/* 前回見た時点より新しい更新情報がある間だけ表示される「未読」ドット */
+.btn-open-patchnotes.has-unread::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #e05d5d;
+  border: 1.5px solid var(--bg, #14171c);
 }
 
 /* ==========================================================
