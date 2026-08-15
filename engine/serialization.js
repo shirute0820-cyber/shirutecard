@@ -40,6 +40,7 @@ function serializeMonster(m) {
     // 竜の里の+4/+4がこのモンスターに乗っているか(竜の里がイベントゾーンを離れるとき、
     // この印がついている対象だけ正確に巻き戻すために必要)
     ryuunoSatoBuffed: !!m.ryuunoSatoBuffed,
+    poison: m.poison ?? 0, // 毒の合計値(2026/08/16トリッカーテーマ追加)
   };
 }
 
@@ -57,6 +58,7 @@ function deserializeMonster(o) {
     tempHpThisTurn: o.tempHpThisTurn ?? 0,
     usedDoubleAttackThisTurn: o.usedDoubleAttackThisTurn ?? false,
     ryuunoSatoBuffed: !!o.ryuunoSatoBuffed,
+    poison: o.poison ?? 0,
   };
 }
 
@@ -108,6 +110,9 @@ function serializePlayer(p) {
     secondPlayerBonusCostRemaining: p.secondPlayerBonusCostRemaining,
     secondPlayerBonusCostUsedThisTurn: p.secondPlayerBonusCostUsedThisTurn,
     pendingCostReduction: p.pendingCostReduction ?? null, // 神の啓示の予約情報
+    poison: p.poison ?? 0, // 毒の合計値(2026/08/16トリッカーテーマ追加)
+    // ドクター・ベアトラップで「毒化」された盤面スロット番号(Setはそのまま保存できないため配列化)
+    poisonedSlots: [...(p.poisonedSlots ?? [])],
   };
 }
 
@@ -126,6 +131,8 @@ function deserializePlayer(o) {
     pendingCostReduction: o.pendingCostReduction ?? null,
     secondPlayerBonusCostRemaining: o.secondPlayerBonusCostRemaining ?? 2,
     secondPlayerBonusCostUsedThisTurn: o.secondPlayerBonusCostUsedThisTurn ?? false,
+    poison: o.poison ?? 0,
+    poisonedSlots: new Set(o.poisonedSlots ?? []),
   };
 }
 
