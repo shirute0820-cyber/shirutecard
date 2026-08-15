@@ -41,6 +41,11 @@ function createPlayer(id, deckList) {
     // コスト減少を適用するための予約情報。{defName, ownTurnCount, amount} | null
     // ドローされないままそのターンが終わると消滅する(endTurn()で破棄)。
     pendingCostReduction: null,
+    poison: 0, // 毒の合計値(2026/08/16トリッカーテーマ追加)
+    // ドクター・ベアトラップ①で「毒化」された自分の盤面スロット番号の集合。
+    // 解除条件はなく永続(ゲーム終了まで)。ここに含まれるスロットに新たにモンスターが
+    // 召喚される(手札から/特殊召喚問わず)たび、そのモンスターへ毒8を自動付与する
+    poisonedSlots: new Set(),
   };
 }
 
@@ -275,6 +280,24 @@ export class GameState {
     const hpSum = player.board.reduce((sum, m) => sum + (m ? m.currentHp : 0), 0);
     player.shield += Math.floor(hpSum / 2);
 
+    // 毒によるダメージ処理(トリッカーテーマ、2026/08/16追加)。
+    // シールドのスナップショット計算が終わった直後に行う(毒ダメージはシールドを貫通しないため、
+    // この時点でシールドが確定していないと正しく消費できない)。
+    // 対象は「このプレイヤー自身のターン終了時」に限り、自分の場のモンスターとプレイヤー自身。
+    for (const m of [...player.board]) {
+      if (m) this.processPoisonTick(player, m);
+    }
+    this.processPoisonTick(player, player);
+
+    // ドクター・ポイズン②: このカードが自分の場にいる間は、自分のエンドフェイズ時に
+    // 敵の場のモンスターも(本来対象外のはずが)例外的に毒ダメージ処理を受ける
+    if (player.board.some((m) => m && m.defName === "ドクター・ポイズン")) {
+      const opp = this.players[this.opponentOf(player.id)];
+      for (const m of [...opp.board]) {
+        if (m) this.processPoisonTick(opp, m);
+      }
+    }
+
     // 「ターン終了時まで」の一時的なステータス上昇(例:リバーススケイル)を元に戻す。
     // シールドのスナップショット計算(直前)には、この一時バフがかかった状態の
     // HPを反映させたいため、シールド計算より後にここで戻す。
@@ -361,6 +384,15 @@ export class GameState {
     }
     player.hand.push(handCard);
     this.emitUiEvent({ type: "draw", playerId: player.id });
+
+    // ドクター・ポイズン③等、「自プレイヤーがカードをドローするたび」系のフック。
+    // このカードの持ち主自身が引いたときにのみ発火する(相手の場にいる場合は発火しない)
+    const opponent = this.players[this.opponentOf(player.id)];
+    for (const m of player.board) {
+      if (!m) continue;
+      const hook = EFFECTS[m.defName]?.onDrawCard;
+      if (hook) hook({ game: this, player, opponent, instance: m });
+    }
     return true;
   }
 
@@ -462,6 +494,8 @@ export class GameState {
     this.log(`${playerId}: 『${defName}』を召喚(${targetSlot}枠)`);
     this.emitUiEvent({ type: "summon", playerId, slot: targetSlot, defName });
     this.applyZoneSummonBuff(player, instance);
+    this.applyPoisonedSlotEntry(player, instance, targetSlot);
+    this.applyBoardAllySummonHooks(player, instance);
 
     const hook = EFFECTS[defName]?.onSummon;
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params: { ...params, releasedInstance } });
@@ -488,7 +522,29 @@ export class GameState {
     this.log(`${playerId}: 『${defName}』を特殊召喚(デッキ外生成, ${boardSlot}枠)`);
     this.emitUiEvent({ type: "summon", playerId, slot: boardSlot, defName });
     this.applyZoneSummonBuff(player, instance);
+    this.applyPoisonedSlotEntry(player, instance, boardSlot);
+    this.applyBoardAllySummonHooks(player, instance);
     return instance;
+  }
+
+  // ドクター・ベアトラップ①: 「毒化」された自分の盤面スロットに新たにモンスターが
+  // 召喚された場合(手札から/特殊召喚問わず)、そのモンスターへ毒8を自動付与する
+  applyPoisonedSlotEntry(player, instance, slot) {
+    if (player.poisonedSlots && player.poisonedSlots.has(slot)) {
+      this.applyPoisonToMonster(player, instance, 8);
+    }
+  }
+
+  // 「自分の場に新しいモンスターが召喚されるたび」に発火する汎用フック。
+  // 竜の里(イベントゾーン専用のonZoneSummon)とは別に、盤面上の特定モンスターが持つ
+  // 「自分が場にいる限り、新しく召喚された味方◯◯は+△/+□される」系の常時効果用
+  // (2026/08/16タランチュラ・クイーン等で追加)。召喚されたモンスター自身には発火しない
+  applyBoardAllySummonHooks(player, newInstance) {
+    for (const m of player.board) {
+      if (!m || m === newInstance) continue;
+      const hook = EFFECTS[m.defName]?.onAllySummon;
+      if (hook) hook({ game: this, player, instance: m, newInstance });
+    }
   }
 
   findEmptySlot(player) {
@@ -640,6 +696,7 @@ export class GameState {
   canAttack(playerId, instance) {
     if (instance.cannotAttack) return false;
     if (instance.hasAttackedThisTurn) return false;
+    if (this.isAttackBlockedByPoison(playerId, instance)) return false;
     const sick = instance.summonedOnTurn === this.turnNumber;
     if (!sick) return true;
     if (this.hasKeyword(instance, KEYWORDS.SOKKOU)) return true;
@@ -677,12 +734,15 @@ export class GameState {
         opponent.shield -= absorbed;
         dmg -= absorbed;
       }
-      opponent.hp -= dmg;
+      // 毒の探究者ゴゴ①: 直接攻撃してもプレイヤーのHPは減らせない(シールドは通常通り減らせる。
+      // 上のシールド消費計算は既に済んでいるので、ここではHP減少のみをスキップする)
+      const blocksDirectDamage = !!EFFECTS[attackerInstance.defName]?.blocksDirectPlayerDamage;
+      if (!blocksDirectDamage) opponent.hp -= dmg;
       this.log(`${playerId}: 『${attackerInstance.defName}』がプレイヤーに直接攻撃(${dmg}ダメージ、残りシールド${opponent.shield})`);
-      this.emitUiEvent({ type: "damagePlayer", playerId: opponent.id, amount: dmg });
+      this.emitUiEvent({ type: "damagePlayer", playerId: opponent.id, amount: blocksDirectDamage ? 0 : dmg });
       attackerInstance.hasAttackedThisTurn = true;
       if (this.hasKeyword(attackerInstance, KEYWORDS.ONMITSU)) this.removeStealthOnAttack(attackerInstance);
-      this.afterAttack(player, opponent, attackerInstance);
+      this.afterAttack(player, opponent, attackerInstance, "player");
       this.checkWinCondition();
       return;
     }
@@ -699,7 +759,7 @@ export class GameState {
     this.resolveCombat(attackerInstance, defender, player, opponent);
     attackerInstance.hasAttackedThisTurn = true;
     if (this.hasKeyword(attackerInstance, KEYWORDS.ONMITSU)) this.removeStealthOnAttack(attackerInstance);
-    this.afterAttack(player, opponent, attackerInstance);
+    this.afterAttack(player, opponent, attackerInstance, "monster");
 
     // 「敵を破壊したとき、もう一度攻撃できる」系のフック(例: ドラゴニュート・キング)
     const stillAlive = player.board.includes(attackerInstance);
@@ -712,6 +772,12 @@ export class GameState {
   }
 
   resolveCombat(attacker, defender, attackerPlayer, defenderPlayer) {
+    // 毒関連の「交戦時」フック(ドクトゲガエル・デカめのサソリ・ヒュドラ―の分頭・
+    // ドクター・イミュニティ等)。通常のダメージ計算より前に実行し、攻撃側・防御側
+    // どちらの立場でも交戦したことになる双方に対して発火する
+    this.triggerOnCombat(attacker, attackerPlayer, defender, defenderPlayer);
+    this.triggerOnCombat(defender, defenderPlayer, attacker, attackerPlayer);
+
     const attackerInvuln = attacker.invulnerableThisTurn;
     const defenderInvuln = defender.invulnerableThisTurn;
 
@@ -775,9 +841,20 @@ export class GameState {
   // 例: 天啓の聖女ジャンヌ・ダルクの《超越》「1ターンに2回攻撃できる」は、
   // 1回目の攻撃直後にhasAttackedThisTurnを1度だけ再度falseへ戻すことで実現する
   // (ドラゴニュート・キングの「敵を破壊したらもう一度攻撃できる」と同じ考え方の汎用化)。
-  afterAttack(player, opponent, instance) {
+  // targetType: 'player' | 'monster'(2026/08/16追加。直接攻撃かどうかで挙動を分けるカード用。
+  // 例: ミニタランチュラ・毒の探究者ゴゴは「相手プレイヤーに直接攻撃したとき」限定の効果を持つ)
+  afterAttack(player, opponent, instance, targetType) {
     const hook = EFFECTS[instance.defName]?.onAfterAttack;
-    if (hook) hook({ game: this, player, opponent, instance });
+    if (hook) hook({ game: this, player, opponent, instance, targetType });
+  }
+
+  // 「交戦時」(このモンスターが攻撃側・防御側いずれかとして戦闘に参加したとき)に発火する
+  // 汎用フック。resolveCombat()から、攻撃側・防御側の両方に対して呼ばれる
+  // (2026/08/16トリッカーテーマ追加。ドクトゲガエル・デカめのサソリ・ヒュドラ―の分頭・
+  //  ドクター・イミュニティ等が利用)
+  triggerOnCombat(instance, ownerPlayer, enemyInstance, enemyPlayer) {
+    const hook = EFFECTS[instance.defName]?.onCombat;
+    if (hook) hook({ game: this, player: ownerPlayer, opponent: enemyPlayer, instance, enemyInstance });
   }
 
   checkWinCondition() {
@@ -972,5 +1049,108 @@ export class GameState {
     for (const m of player.board) {
       if (m && races.includes(m.race)) m.grantedKeywords.add(keyword);
     }
+  }
+
+  // ---------------- 毒(トリッカーテーマ、2026/08/16追加) ----------------
+
+  // 毒の増減を一箇所で行うための共通ヘルパー。target.poison を直接書き換えず、
+  // 必ずこの関数を経由すること。増減量(delta)をEFFECTS[...].onPoisonChangedへ
+  // 通知するために必要(例: デカめのサソリ「毒の合計分体力が増加する」は、毒が
+  // 増減するたびにcurrentHpを連動させる常時計算として実装している)。
+  setPoisonAmount(ownerPlayer, target, newAmount) {
+    const clamped = Math.max(0, newAmount);
+    const delta = clamped - (target.poison || 0);
+    target.poison = clamped;
+    if (delta !== 0 && target.defName) {
+      const hook = EFFECTS[target.defName]?.onPoisonChanged;
+      if (hook) hook({ game: this, player: ownerPlayer, instance: target, delta });
+    }
+  }
+
+  applyPoisonToMonster(ownerPlayer, instance, amount) {
+    if (amount <= 0) return;
+    this.setPoisonAmount(ownerPlayer, instance, (instance.poison || 0) + amount);
+    this.log(`${ownerPlayer.id}: 『${instance.defName}』に毒${amount}を付与(合計${instance.poison})`);
+    this.emitUiEvent({ type: "poisonApplied", ownerId: ownerPlayer.id, targetType: "monster", defName: instance.defName, amount });
+  }
+
+  applyPoisonToPlayer(player, amount) {
+    if (amount <= 0) return;
+    this.setPoisonAmount(player, player, (player.poison || 0) + amount);
+    this.log(`${player.id}: 自身に毒${amount}を付与(合計${player.poison})`);
+    this.emitUiEvent({ type: "poisonApplied", ownerId: player.id, targetType: "player", amount });
+  }
+
+  applyPoisonToAllEnemyMonsters(opponent, amount) {
+    for (const m of [...opponent.board]) {
+      if (m) this.applyPoisonToMonster(opponent, m, amount);
+    }
+  }
+
+  // ポイズン・ラボが(自分・相手どちらの場でも)イベントゾーンに存在する限り、
+  // 場に存在するモンスターに付与された毒は、ダメージを受けた後の自動減少(-4)が起こらなくなる
+  isPoisonDecayDisabled() {
+    return this.players.p1.eventZone === "ポイズン・ラボ" || this.players.p2.eventZone === "ポイズン・ラボ";
+  }
+
+  // 相手の場にドクター・ニューロトキシンがいる場合、毒が付与されている自分のモンスターは
+  // 攻撃できない(ドクター・ニューロトキシンの静的効果。canAttack()から呼ばれる)
+  isAttackBlockedByPoison(playerId, instance) {
+    if (!(instance.poison > 0)) return false;
+    const opponent = this.players[this.opponentOf(playerId)];
+    return opponent.board.some((m) => m && m.defName === "ドクター・ニューロトキシン");
+  }
+
+  // エンドフェイズの毒ダメージ処理(1体/1人分)。呼び出し元(endTurn())で
+  // 「シールドのスナップショット計算が終わった後」というタイミングを保証すること。
+  // - 【抗体】持ちのモンスターはダメージを無効化するが、毒の値自体は通常通り減少する
+  // - 超越の無敵(invulnerableThisTurn)中は、ダメージ・減少どちらも発生しない
+  //   (ダメージを全く受けていない扱いのため。抗体は「ダメージだけ無効」という
+  //    明示的な仕様があるためこれとは扱いを分けている)
+  // - ポイズン・ラボが場にある間は減少処理そのものを止める
+  processPoisonTick(ownerPlayer, target) {
+    const amount = target.poison || 0;
+    if (amount <= 0) return;
+    const isMonster = target !== ownerPlayer;
+    if (isMonster && target.invulnerableThisTurn) return;
+    const koutai = isMonster && this.hasKeyword(target, KEYWORDS.KOUTAI);
+    if (!koutai) {
+      if (isMonster) this.dealDamageToMonster(ownerPlayer, target, amount);
+      else this.dealPoisonDamageToPlayer(ownerPlayer, amount);
+    }
+    if (!this.isPoisonDecayDisabled()) {
+      this.setPoisonAmount(ownerPlayer, target, Math.max(0, target.poison - 4));
+    }
+  }
+
+  // 毒によるプレイヤーへのダメージ。シールドを貫通しない(攻撃時のシールド消費と同じ考え方)
+  dealPoisonDamageToPlayer(player, amount) {
+    let dmg = amount;
+    if (player.shield > 0) {
+      const absorbed = Math.min(player.shield, dmg);
+      player.shield -= absorbed;
+      dmg -= absorbed;
+    }
+    player.hp -= dmg;
+    this.log(`${player.id}: 毒により${amount}ダメージ(シールド消費後の実ダメージ${dmg}、残りHP${player.hp})`);
+    this.emitUiEvent({ type: "damagePlayer", playerId: player.id, amount: dmg, source: "poison" });
+    this.checkWinCondition();
+  }
+
+  // ---------------- 持続イベントの起動効果(ポイズン・ラボ③用に新設) ----------------
+  // 既存のcanActivateAbility/activateAbilityは「場のモンスター」専用のため、
+  // イベントゾーンに置かれた持続イベント自身が持つ起動効果には対応できない。
+  // そのための並行した仕組みとして新設する。
+  canActivateZoneAbility(playerId) {
+    const player = this.players[playerId];
+    if (!player.eventZone) return false;
+    return !!EFFECTS[player.eventZone]?.onZoneActivate;
+  }
+
+  activateZoneAbility(playerId, params = {}) {
+    if (!this.canActivateZoneAbility(playerId)) throw new Error("この持続イベントの起動効果は使用できません");
+    const player = this.players[playerId];
+    const hook = EFFECTS[player.eventZone]?.onZoneActivate;
+    hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], params });
   }
 }
