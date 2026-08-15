@@ -9,6 +9,7 @@ export const KEYWORDS = Object.freeze({
   CHOUHATSU: "挑発",  // 相手はこのモンスターしか攻撃対象にできない
   ONMITSU: "隠密",    // 攻撃対象にならない(自身が攻撃すると解除)
   KAKUSATSU: "確殺",  // 交戦した相手をステータス無視で破壊
+  KOUTAI: "抗体",     // 毒ダメージを受けない(毒の付与自体は防がない。2026/08/16トリッカーテーマ追加)
 });
 
 export const PHASES = Object.freeze({
