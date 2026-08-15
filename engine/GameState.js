@@ -393,14 +393,21 @@ export class GameState {
     if (def.type !== "モンスター") throw new Error("モンスターカードではありません");
 
     const targetSlot = boardSlot;
-    // sacrificeRequirement(異端審問官コーション等): 通常のコストを払わず、
-    // 指定した名前のカードを自分の場・手札から墓地へ送ることで特殊召喚する専用の召喚方法
+    // sacrificeRequirement(異端審問官コーション等): 通常のコストに加えて、
+    // 指定した名前のカードを自分の場・手札から墓地へ送ることを追加コストとして要求する召喚方法。
+    // 2026/08/14改訂: 以前は「特殊召喚」として通常コストごと免除していたが、これは不具合で、
+    // 正しくは通常コストを支払った上での追加コストだったため修正済み(リリース召喚と同じ扱い)
     const isSacrificeSummon = !!def.sacrificeRequirement;
     const cost = this.getEffectiveHandCost(player, handEntry, def); // 神の啓示・竜の里等によるコスト減少を反映
 
-    if (!isSacrificeSummon && player.resourceAvailable < cost) {
+    if (player.resourceAvailable < cost) {
       throw new Error("コストが足りません");
     }
+
+    // リリース召喚でリリースしたモンスターの情報(超越済みだったか等)を、後段のonSummonフックへ
+    // 引き継ぐための一時変数(ダリアバーミリオン・ドラゴン等の「リリース元が超越していたら
+    // このカードも超越する」を判定するために使用)
+    let releasedInstance = null;
 
     if (def.releaseRequirement) {
       // リリース召喚: どのモンスターをリリースするかは、必ず呼び出し側(UI)が
@@ -412,6 +419,7 @@ export class GameState {
       if (!releaseTarget || releaseTarget.defName !== def.releaseRequirement) {
         throw new Error(`『${def.releaseRequirement}』がいる枠を選んでください`);
       }
+      releasedInstance = releaseTarget;
       this.sendToGraveyard(player, releaseTarget);
       // リリースしたモンスターがいた枠に、そのまま新しいモンスターを置く(targetSlotは変更不要)
     } else if (isSacrificeSummon) {
@@ -440,9 +448,7 @@ export class GameState {
       throw new Error("その盤面枠は空いていません");
     }
 
-    if (!isSacrificeSummon) {
-      player.resourceAvailable -= cost;
-    }
+    player.resourceAvailable -= cost;
 
     // sacrificeSummon側でhand配列が変化している可能性があるため、
     // 自分自身(このカード)のインデックスは改めて探し直す
@@ -458,7 +464,7 @@ export class GameState {
     this.applyZoneSummonBuff(player, instance);
 
     const hook = EFFECTS[defName]?.onSummon;
-    if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params });
+    if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(playerId)], instance, params: { ...params, releasedInstance } });
 
     return instance;
   }
