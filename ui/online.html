@@ -199,7 +199,10 @@
 <body>
   <div id="setup-screen">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-      <button class="btn-open-rules">ルール</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-open-rules">ルール</button>
+        <button class="btn-open-patchnotes">更新情報</button>
+      </div>
       <p id="app-version-label" style="font-size:11px;color:var(--muted);margin:0;">Ver. -</p>
     </div>
     <h2>1. Firebase設定を貼り付けて接続</h2>
@@ -397,6 +400,16 @@
         <span class="rules-modal-title">ルール説明</span>
       </div>
       <div id="rules-modal-content"></div>
+    </div>
+  </div>
+
+  <div id="patch-modal-overlay" style="display:none;">
+    <div id="patch-modal">
+      <div id="patch-modal-header">
+        <button id="btn-close-patchnotes">✕ 閉じる</button>
+        <span class="patch-modal-title">更新情報(カード変更履歴)</span>
+      </div>
+      <div id="patch-modal-content"></div>
     </div>
   </div>
 
