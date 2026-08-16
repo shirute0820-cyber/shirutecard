@@ -24,7 +24,7 @@ import { KEYWORDS, CONFIG } from "./constants.js";
 //   自身が持つ、プレイヤーが任意タイミングで発動できる起動効果(ポイズン・ラボ③)
 // onAllySummon({game, player, instance, newInstance}) … 自分の場に新しいモンスターが
 //   召喚されるたびに発火。「自分が場にいる限り、新しく出た味方◯◯は+△/+□される」系の
-//   常時効果用(タランチュラ・クイーン②)
+//   常時効果用(タランチュラベイビー②、実装はタランチュラ・クイーン側)
 // blocksDirectPlayerDamage: true … 相手プレイヤーへ直接攻撃してもHPを減らせない
 //   (シールドは通常通り消費できる。毒の探究者ゴゴ①)
 //
@@ -839,6 +839,7 @@ export const EFFECTS = {
     onDrawCard({ game, player, opponent }) {
       for (const m of [...player.board]) if (m) game.applyPoisonToMonster(player, m, 8);
       for (const m of [...opponent.board]) if (m) game.applyPoisonToMonster(opponent, m, 8);
+      game.applyPoisonToPlayer(opponent, 8);
     },
   },
   "ヒュドラ―の分頭": {
@@ -849,6 +850,10 @@ export const EFFECTS = {
     },
     onCombat({ game, opponent, enemyInstance }) {
       if (enemyInstance) game.applyPoisonToPlayer(opponent, 4);
+    },
+    // ③場から離れたとき、自プレイヤーのHPを8回復する
+    onLeaveField({ game, player }) {
+      game.healPlayer(player, 8);
     },
   },
   "九頭竜ヒュドラ―": {
@@ -875,8 +880,16 @@ export const EFFECTS = {
     // 「破壊されたとき」= このゲームでは戦闘・効果いずれの理由でも墓地送りは
     // sendToGraveyard()に一本化されているため、他カードの「場を離れたとき」系と同様に
     // onLeaveFieldで実装する
-    onLeaveField({ game, player }) {
+    // ②『タランチュラ・クイーン』が自分の場に存在するとき、このカードは+4/+8される、は
+    // タランチュラ・クイーン側の常時効果(auraGiveAtk / 直接HP加算)として実装済みのため
+    // ここには実装不要
+    onLeaveField({ game, player, opponent }) {
       game.drawOne(player);
+      // タランチュラ・クイーン③: 自分の場に『タランチュラ・クイーン』が存在するとき、
+      // このカードが破壊されると相手プレイヤーに毒4を付与する(効果自体はクイーン側の
+      // カードテキストだが、発火元はベイビー自身の場離脱のためここで判定する)
+      const hasQueen = player.board.some((m) => m && m.defName === "タランチュラ・クイーン");
+      if (hasQueen) game.applyPoisonToPlayer(opponent, 4);
     },
   },
   "タランチュラ・クイーン": {
@@ -911,6 +924,13 @@ export const EFFECTS = {
     auraGiveAtk({ target }) {
       return target.defName === "タランチュラベイビー" ? 4 : 0;
     },
+    // ②1ターンに1度発動可能。自分の場に空きがあれば『タランチュラベイビー』1体を特殊召喚する
+    // (新規に出したベイビーへのHP+8はonAllySummon側で自動付与される)
+    onActivate({ game, player }) {
+      const slot = game.findEmptySlot(player);
+      if (slot === -1) throw new Error("自分の場に空きがありません");
+      game.specialSummonToken(player.id, "タランチュラベイビー", slot);
+    },
     onLeaveField({ game, player }) {
       // このクイーンが場を離れるとき、直接加算していたHP+8分を巻き戻す(竜の里のonZoneLeaveと同じ考え方)
       for (const m of player.board) {
@@ -920,12 +940,9 @@ export const EFFECTS = {
           if (m.currentHp <= 0) game.sendToGraveyard(player, m);
         }
       }
-      // ③破壊されたとき『タランチュラベイビー』2体を自分の場に出す
-      for (let i = 0; i < 2; i++) {
-        const slot = game.findEmptySlot(player);
-        if (slot === -1) break;
-        game.specialSummonToken(player.id, "タランチュラベイビー", slot);
-      }
+      // ③(自分の場に存在する『タランチュラベイビー』が破壊されたとき、相手に毒4)は
+      // タランチュラベイビー側のonLeaveFieldで判定するように変更(2026/08/16修正)。
+      // 旧仕様の「クイーン自身が破壊されたときベイビー2体を特殊召喚」は廃止
     },
     onTranscend({ game, player }) {
       // 超越した瞬間の1回きりの恒久バフ(②の継続オーラ・直接加算とは別枠、デフォルトルール通り)
