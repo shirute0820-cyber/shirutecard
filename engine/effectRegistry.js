@@ -108,6 +108,27 @@ export const EFFECTS = {
       return opponent.board.some(Boolean) ? [] : [KEYWORDS.SOKKOU];
     },
   },
+  // 2026/08/21新規実装: スプレッドシートには存在していたが、cardDefinitions.js側に
+  // カード定義自体が漏れており発動できない状態だった(未定義カードエラーになる)。
+  // 「手札のイベント(通常/持続とも)を1枚墓地に送ることで発動できる」という発動コストを
+  // ドラゴンの血誓・滝の試練と同じparams.discardHandUidパターンで実装する。
+  タイフーン: {
+    onEvent({ game, player, opponent, params }) {
+      const discard = player.hand.find((c) => c.uid === params.discardHandUid);
+      if (!discard) throw new Error("墓地へ送る手札のイベントカードを指定してください");
+      const discardDef = CARD_DEFS[discard.defName];
+      if (!discardDef || (discardDef.type !== "イベント" && discardDef.type !== "持続イベント")) {
+        throw new Error("墓地へ送るカードはイベント(または持続イベント)である必要があります");
+      }
+      player.hand.splice(player.hand.indexOf(discard), 1);
+      player.graveyard.push(discard.defName);
+      // 対象(相手のイベントゾーン)が無ければ、コストだけ支払って不発になる
+      // (レッドドラゴン・ブルードラゴン等と同じ「対象が見つからなければ何もしない」設計)
+      if (opponent.eventZone) {
+        game.destroyEventZoneCard(opponent.id, "『タイフーン』の効果で");
+      }
+    },
+  },
 
   // ---------- 赤テーマ ----------
   竜餐の祭日: {
@@ -758,8 +779,8 @@ export const EFFECTS = {
   },
   デカめのサソリ: {
     onCombat({ game, player, opponent, instance, enemyInstance }) {
-      if (enemyInstance) game.applyPoisonToMonster(opponent, enemyInstance, 8);
-      game.applyPoisonToMonster(player, instance, 8);
+      if (enemyInstance) game.applyPoisonToMonster(opponent, enemyInstance, 4);
+      game.applyPoisonToMonster(player, instance, 4);
     },
     // ②毒の合計分体力が増加する(常時計算)。竜の里と同じ「直接加算方式」で、
     // 毒が増減するたびにcurrentHpを連動させる(このゲームにはHPの実効値オーバーレイの
