@@ -253,6 +253,13 @@ let db = null;
 let dbRefFns = null; // { ref, set, onValue, get, update }
 let roomCode = null;
 let myPlayerId = null; // "p1" | "p2"
+// subscribeToRoom() / subscribeToMetaForInit() が返すFirebaseの購読解除関数を保持する。
+// 以前はこれを一切呼んでおらず、「ホーム画面に戻る」→別の部屋を作る/参加する、を繰り返すと
+// 古い部屋を購読したままのリスナーが残り続けた。古い部屋のデータ自体は削除されていれば実害は
+// 薄いが、削除に失敗した場合や、削除前後のタイミング次第では古いスナップショットが後から届いて
+// 新しい部屋の表示を上書きしてしまう恐れがあったため、新しい購読を始める前に必ず解除するようにする
+let stateUnsub = null;
+let metaInitUnsub = null;
 let game = null;
 // 自分の書き込みが少し間を置いて2回続く(例:召喚→すぐ超越、など)と、
 // 1回分しか吸収できない単純なbooleanフラグ(旧suppressNextPush)では、
@@ -342,6 +349,23 @@ document.getElementById("btn-forget-firebase-config").onclick = () => {
   }
 })();
 
+// 決着済み(game.winnerが確定済み)の部屋データを検知して削除する。
+// 2026/08/21新規追加: 「ホーム画面に戻る」を押し忘れて対戦を終えた場合など、
+// 何らかの事情で部屋データが残ってしまったとき、次にその部屋コードを使おうとした
+// プレイヤーが決着済みの古い対戦にそのまま入ってしまい、プレイ不能になる不具合の対応。
+// 部屋作成時・参加/再接続時のどちらでも、既存のstateが「決着済み」なら自動的に
+// 掃除してから通常のフローを続行させる(手動でのリセット操作を要求しない)
+async function purgeIfFinishedRoom(code, stateVal) {
+  if (!stateVal || !stateVal.winner) return false;
+  try {
+    await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/state`), null);
+    await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/meta`), null);
+  } catch (err) {
+    console.error(`決着済みの部屋「${code}」の自動削除に失敗しました:`, err);
+  }
+  return true;
+}
+
 document.getElementById("btn-create-room").onclick = async () => {
   const status = document.getElementById("setup-status");
   if (!myDeckIsValid()) {
@@ -355,12 +379,17 @@ document.getElementById("btn-create-room").onclick = async () => {
 
   try {
     // 既に同じ部屋コードが存在する場合、誤って上書き(ゲームリセット)しないようにする。
-    // 再接続したい場合は「参加する」/「部屋を作った側として再接続する」を使う。
+    // ただし、既存の対戦が決着済み(winner確定済み)なら古いデータとみなし自動的に片付ける
     const existingSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/meta`));
     if (existingSnap.exists()) {
-      status.textContent =
-        "この部屋コードは既に使われています。再接続したい場合は「参加する」または「部屋を作った側として再接続する」を使ってください。";
-      return;
+      const existingStateSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
+      const purged = await purgeIfFinishedRoom(roomCode, existingStateSnap.exists() ? existingStateSnap.val() : null);
+      if (!purged) {
+        status.textContent =
+          "この部屋コードは既に使われています(対戦中の可能性があります)。再接続したい場合は「参加する」または「部屋を作った側として再接続する」を使ってください。";
+        return;
+      }
+      status.textContent = `部屋「${roomCode}」は決着済みだったため自動的にリセットしました。新しい部屋を作成します。`;
     }
   } catch (err) {
     status.textContent = `確認エラー: ${err.message}`;
@@ -420,20 +449,28 @@ async function connectExistingRoom(playerId) {
   game = null;
 
   try {
-    // 既に対戦が始まっている(state が存在する)なら、再接続として扱う
+    // 既に対戦が始まっている(state が存在する)なら、再接続として扱う。
+    // ただし、その対戦が既に決着済み(winner確定済み)の場合は、古い対戦にそのまま
+    // 入ってプレイ不能になってしまわないよう、自動的に片付けてから
+    // 「まだ対戦が始まっていない場合」の通常フローに合流させる(2026/08/21追加)
     const stateSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/state`));
     if (stateSnap.exists()) {
-      saveRoomPlayerRole(roomCode, playerId);
-      game = hydrateGame(stateSnap.val(), { log: pushLog });
-      subscribeToRoom();
-      enterGameScreen();
-      return;
+      if (stateSnap.val()?.winner) {
+        await purgeIfFinishedRoom(roomCode, stateSnap.val());
+        status.textContent = `部屋「${roomCode}」の対戦は既に決着していたため、自動的にリセットしました。`;
+      } else {
+        saveRoomPlayerRole(roomCode, playerId);
+        game = hydrateGame(stateSnap.val(), { log: pushLog });
+        subscribeToRoom();
+        enterGameScreen();
+        return;
+      }
     }
 
-    // まだ対戦が始まっていない場合
+    // まだ対戦が始まっていない場合(または上記で決着済みの部屋を片付けた直後)
     const metaSnap = await dbRefFns.get(dbRefFns.ref(db, `rooms/${roomCode}/meta`));
     if (!metaSnap.exists()) {
-      status.textContent = "その部屋コードは見つかりませんでした。";
+      status.textContent = (status.textContent ? status.textContent + "\n" : "") + "その部屋コードは見つかりませんでした。";
       return;
     }
     const meta = metaSnap.val();
@@ -467,7 +504,8 @@ async function connectExistingRoom(playerId) {
 // 両者のデッキ(host/guest)が揃ったら、どちらかのクライアントが対戦を初期化する。
 // 同時に両方が初期化を試みても、Firebaseのトランザクションにより一度しか成功しない。
 function subscribeToMetaForInit() {
-  dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/meta`), async (snap) => {
+  metaInitUnsub?.();
+  metaInitUnsub = dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/meta`), async (snap) => {
     if (!snap.exists()) return;
     const meta = snap.val();
     if (!meta.hostDeck || !meta.guestDeck) return;
@@ -497,7 +535,8 @@ function subscribeToMetaForInit() {
 let roomWasReset = false; // 自分/相手がホームに戻って部屋をリセットした後、二重処理を防ぐフラグ
 
 function subscribeToRoom() {
-  dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/state`), (snap) => {
+  stateUnsub?.();
+  stateUnsub = dbRefFns.onValue(dbRefFns.ref(db, `rooms/${roomCode}/state`), (snap) => {
     if (!snap.exists()) {
       // 部屋が削除された(誰かが「ホーム画面に戻る」を押した)場合、
       // まだゲーム画面にいるならホームに戻す。既に自分でリセット済みなら何もしない。
@@ -568,6 +607,14 @@ function returnToHomeScreen(message) {
   mulliganReturn = new Set();
   endGameConfirmPending = false;
 
+  // この部屋を購読していたFirebaseリスナーを解除する(2026/08/21追加)。
+  // 以前はここで解除しておらず、「ホーム画面に戻る→別の部屋を作る/参加する」を
+  // 繰り返すと古い部屋を購読したままのリスナーが残り続けていた
+  stateUnsub?.();
+  stateUnsub = null;
+  metaInitUnsub?.();
+  metaInitUnsub = null;
+
   const banner = document.querySelector(".winner-banner");
   if (banner) banner.remove();
 
@@ -587,7 +634,12 @@ async function deleteRoomDataAndGoHome(message) {
     await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/state`), null);
     await dbRefFns.set(dbRefFns.ref(db, `rooms/${code}/meta`), null);
   } catch (err) {
+    // 2026/08/21修正: 以前はconsole.errorのみで、削除に失敗してもユーザーは
+    // 気づく手段が無く、「部屋データが削除されていない」不具合の一因になっていた。
+    // 画面上のステータス表示にも失敗を反映し、気づけるようにする
     console.error("部屋の削除に失敗しました:", err);
+    document.getElementById("setup-status").textContent =
+      `${message ?? ""}\n(注意: 部屋「${code}」のデータ削除に失敗しました: ${err.message}。同じ部屋コードを再利用すると、前回の対戦が残っている場合があります)`;
   }
 }
 
@@ -813,6 +865,18 @@ const PARAM_BUILDERS = {
     const c = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid && CARD_DEFS[c.defName]?.race === "ドラゴン"), "墓地へ送るドラゴン種の手札");
     if (c === CANCELLED) return null;
     return { discardHandUid: c?.uid };
+  },
+  タイフーン: async ({ player, selfUid }) => {
+    const pool = player.hand.filter(
+      (c) => c.uid !== selfUid && (CARD_DEFS[c.defName]?.type === CARD_TYPES.EVENT || CARD_DEFS[c.defName]?.type === CARD_TYPES.PERSISTENT_EVENT)
+    );
+    if (pool.length === 0) {
+      alert("墓地へ送れるイベントカードが手札にありません");
+      return null;
+    }
+    const c = pool.length === 1 ? pool[0] : await pickHandCard(pool, "墓地へ送るイベントカード");
+    if (c === CANCELLED) return null;
+    return { discardHandUid: c.uid };
   },
   滝の試練: async ({ player, selfUid }) => {
     const discard = await pickHandCard(player.hand.filter((c) => c.uid !== selfUid), "捨てる手札");
@@ -1467,7 +1531,11 @@ function renderHand(role) {
 
   for (const c of player.hand) {
     const def = CARD_DEFS[c.defName];
-    const effectiveCost = def?.cost != null ? Math.max(0, def.cost - (c.costReduction || 0)) : def?.cost;
+    // 神の啓示のcostReductionに加え、竜の里のような「イベントゾーンにいる間の動的な
+    // コスト軽減」も表示に反映する(2026/08/21: online-app.jsにこの修正が未反映で、
+    // 竜の里のコスト低下がオンライン対戦の手札表示に出ていなかった不具合の対応。
+    // app.js側は既に同じ修正が入っていたため、実装をgame.getEffectiveHandCost()に揃えた)
+    const effectiveCost = def?.cost != null ? game.getEffectiveHandCost(player, c, def) : def?.cost;
     const el = document.createElement("div");
     el.className = "card " + cardTierClass(def);
     if (selectedHandCard?.uid === c.uid) el.classList.add("selected");
