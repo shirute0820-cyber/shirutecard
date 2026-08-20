@@ -401,7 +401,11 @@ main {
    ②中央揃え(left:50%)のままだと、一番左・一番右のカードでは吹き出しが画面端や
    　隣接パネル(左列のシールド/超越/ストレージ等)からはみ出しやすいため、
    　両端のカード(data-slot="0"/"3")だけ左揃え・右揃えに変更する */
-.board-layout.mirrored .board-row .card-effect-tooltip {
+/* ローカル版(index.html)のみ、相手の場は下向き表示のまま(相手の手札も実物が見えるため、
+   上向きだと相手の手札と重なって隠れてしまう)。オンライン版(online.html)は相手の手札が
+   非公開(中身のないカード裏面のみ)のため下向きにする必要がなく、それどころか下向きのままだと
+   すぐ下にある自分の場のモンスターと重なって読めなくなっていた(2026/08/21修正)。 */
+body.page-local .board-layout.mirrored .board-row .card-effect-tooltip {
   bottom: auto;
   top: calc(100% + 6px);
 }
