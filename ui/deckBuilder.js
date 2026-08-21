@@ -263,3 +263,12 @@ export function listNonGenericThemes() {
 export function listBuildableCardsForTheme(theme) {
   return listBuildableCards().filter((def) => def.theme === "汎用" || def.theme === theme);
 }
+
+// 枚数制限0(デッキには入れられない、カード効果でのみ場に出る)カードの一覧を、
+// テーマ別に参照表示する用(2026/08/21新規追加)。デッキ構築画面で「このテーマのデッキから
+// カード効果で出てくるカードにはどんなものがあるか」を確認できるようにするための一覧
+export function listSpecialSummonOnlyCardsForTheme(theme) {
+  return Object.values(CARD_DEFS)
+    .filter((def) => copyLimitOf(def.name) === 0 && (def.theme === "汎用" || def.theme === theme))
+    .sort((a, b) => (a.cost ?? 0) - (b.cost ?? 0) || a.name.localeCompare(b.name));
+}
