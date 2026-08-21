@@ -858,3 +858,91 @@ body.page-local .board-layout.mirrored .board-row .card-effect-tooltip {
   15% { opacity: 1; transform: translate(-50%, -6px) scale(1.05); }
   100% { opacity: 0; transform: translate(-50%, -34px) scale(1); }
 }
+
+/* ==========================================================
+   スマホの横画面(ランドスケープ)対応(2026/08/21追加)
+   PC・タブレット前提の元レイアウト(盤面/手札を横長に並べる構成)は
+   横画面のスマホ(幅は広いが高さが低い)とも相性が良いため、構造の
+   作り直しはせず、余白・フォント・固定幅を画面の高さに応じて縮小する
+   ことで対応する。判定は「横向き」かつ「画面の高さが低い」の両方を
+   条件にすることで、タブレットの横画面(高さに余裕がある)には影響
+   しないようにしている。
+   ========================================================== */
+@media (orientation: landscape) and (max-height: 500px) {
+  header {
+    padding: 6px 10px;
+  }
+  header h1 { font-size: 13px; }
+  header .sub { display: none; } /* 副題は幅の余裕がないので隠す */
+  #turn-info { font-size: 11px; }
+  #header-end-game-controls button { padding: 3px 7px; font-size: 10px; }
+
+  main {
+    padding: 6px;
+    gap: 6px;
+  }
+  .player-area {
+    padding: 5px 8px;
+  }
+  .player-area h2 { font-size: 12px; margin-bottom: 3px; }
+  .mini-stats { font-size: 10.5px; gap: 10px; margin: 2px 0; }
+
+  /* 盤面グリッドの固定幅(左列・イベントゾーン・右列)を縮小し、
+     場のカード自体にもっと横幅を割けるようにする */
+  .board-layout {
+    grid-template-columns: 62px 1fr 60px 60px;
+    gap: 5px;
+  }
+  .board-row { gap: 4px; }
+  .hand-row { gap: 4px; min-height: 46px; }
+
+  .card {
+    padding: 3px 5px;
+    font-size: 10px;
+    min-height: 46px;
+    border-radius: 4px;
+  }
+
+  /* 左列/右列/イベントゾーンのシールド・HP・超越・デッキ等の表示も、
+     縮めたグリッド幅(62px/60px)に収まるよう余白・フォントを縮小する */
+  .zone-box {
+    padding: 3px 4px;
+    min-height: 38px;
+    border-radius: 4px;
+  }
+  .zone-box .zone-label { font-size: 8.5px; }
+  .zone-box .zone-value { font-size: 13px; margin-top: 0; }
+  .zone-box.transcend-box .zone-value { font-size: 9.5px; }
+  .side-col.left-col, .right-stack { gap: 4px; }
+  .deck-zone-box { min-height: 32px; }
+
+  .controls { padding: 3px 0; gap: 4px; }
+  .controls button { padding: 5px 10px; font-size: 12px; }
+  #selection-info { font-size: 10.5px; min-height: 12px; }
+
+  /* ログパネルは常時表示だと280px分の横幅を占有してしまい、ただでさえ
+     狭い横画面ではゲーム本体を圧迫するため、既定では折りたたみ、
+     ヘッダーのボタンから開閉できるようにする(下記JS側の対応が必要) */
+  body {
+    grid-template-columns: 1fr 0px;
+  }
+  body.log-open {
+    grid-template-columns: 1fr 200px;
+  }
+  #log-panel {
+    display: none;
+    font-size: 10px;
+    padding: 6px;
+  }
+  body.log-open #log-panel {
+    display: block;
+  }
+  #btn-toggle-log {
+    display: inline-block;
+  }
+}
+
+/* #btn-toggle-log は横画面の狭い時だけ使うボタンのため、それ以外では常に隠す */
+#btn-toggle-log {
+  display: none;
+}
