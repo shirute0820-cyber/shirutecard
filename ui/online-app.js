@@ -42,14 +42,48 @@ setupRulesModal();
 // ホーム画面の「更新情報」ボタンも同様に、一度だけ結びつけておく
 setupPatchNotesModal();
 
-// スマホの横画面(幅は広いが高さが低い)では、CSS側(style.css)で既定では
-// ログパネルを畳んでいる(280px分の横幅がゲーム本体を圧迫するため)。
-// このボタンでbodyに"log-open"クラスを付け外しして開閉する(2026/08/21追加)。
-// PC・タブレットや縦画面ではCSS側の対象メディアクエリ外のため、このボタン自体は
-// 非表示になり、ログパネルは従来通り常時表示のまま影響を受けない
-document.getElementById("btn-toggle-log").onclick = () => {
-  document.body.classList.toggle("log-open");
-};
+// スマホ版/PC版の手動切り替え(2026/08/21追加)。
+// 当初はCSSの@media(orientation:landscape)で自動判定していたが、実機によっては
+// 判定条件(画面の高さ等)に合致せず切り替わらないケースがあったため、
+// ユーザー自身がボタンで明示的に切り替えられる方式に変更した。
+// 好みはlocalStorageに保存し、次回以降のアクセスでも覚えておく。
+// 初回訪問(保存された好みが無いとき)は、画面幅が狭ければ「スマホ版」を
+// 初期値としておすすめする(それでも自動判定なので、必ずボタンで変更可能)
+const VIEW_MODE_STORAGE_KEY = "shirutecard_view_mode"; // "mobile" | "pc"
+
+function applyViewMode(mode) {
+  document.body.classList.toggle("mobile-view", mode === "mobile");
+  for (const btn of document.querySelectorAll(".btn-toggle-view-mode")) {
+    btn.textContent = mode === "mobile" ? "PC版に切り替え" : "スマホ版に切り替え";
+  }
+}
+
+function initViewMode() {
+  let mode = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+  if (mode !== "mobile" && mode !== "pc") {
+    // 保存された好みが無い初回訪問時のみ、画面幅から自動でおすすめする
+    mode = window.innerWidth <= 820 ? "mobile" : "pc";
+  }
+  applyViewMode(mode);
+  for (const btn of document.querySelectorAll(".btn-toggle-view-mode")) {
+    btn.onclick = () => {
+      const next = document.body.classList.contains("mobile-view") ? "pc" : "mobile";
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, next);
+      applyViewMode(next);
+    };
+  }
+}
+initViewMode();
+
+// スマホの狭い画面では、CSS側(style.css)でログパネルを既定では畳んでいる
+// (280px分の横幅がゲーム本体を圧迫するため)。このボタンでbodyに"log-open"
+// クラスを付け外しして開閉する(2026/08/21追加)。PC版表示中はCSS側の対象
+// セレクタ外のため、このボタン自体が非表示になり影響を受けない
+for (const btn of document.querySelectorAll("#btn-toggle-log")) {
+  btn.onclick = () => {
+    document.body.classList.toggle("log-open");
+  };
+}
 
 // ==========================================================
 // ログ(画面上の簡易ログパネル用)
