@@ -133,11 +133,56 @@
     cursor: pointer;
   }
   #deck-summary button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #deck-builder-columns {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  #deck-builder-main { flex: 1; min-width: 0; }
+  #deck-builder-side {
+    width: 220px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 12px;
+    background: #1b1f27;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .deck-side-heading {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 8px;
+    font-weight: 600;
+  }
+  .deck-current-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+  .deck-current-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .deck-current-row:hover { background: rgba(255,255,255,0.05); }
+  .deck-current-row .dcr-cost { flex-shrink: 0; }
+  .deck-current-row .dcr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .deck-current-row .dcr-count { color: var(--accent2); font-weight: 700; flex-shrink: 0; }
   #deck-card-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 8px;
   }
+  #deck-special-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .deck-card.special-summon-only { opacity: 0.85; }
+  .special-summon-only-label { color: var(--muted); font-size: 10px; margin-top: 4px; line-height: 1.4; }
   .deck-card {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -145,6 +190,10 @@
     background: #262b34;
     font-size: 12px;
     position: relative; /* ツールチップの基準位置にする */
+  }
+  @media (max-width: 720px) {
+    #deck-builder-columns { flex-direction: column; }
+    #deck-builder-side { width: 100%; position: static; max-height: none; }
   }
   .deck-card .name { font-weight: 600; margin-bottom: 2px; }
   .deck-card .meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
@@ -249,8 +298,20 @@
     </div>
     <div id="deck-theme-tabs"></div>
     <p id="deck-theme-hint">テーマはデッキ作成時に1つだけ選び、以後そのデッキでは変更できません。別のテーマで組みたい場合は「+ 新しいデッキを作る」から新規に作成してください。</p>
-    <div id="deck-card-list"></div>
+    <div id="deck-builder-columns">
+      <div id="deck-builder-main">
+        <div id="deck-card-list"></div>
+      </div>
+      <div id="deck-builder-side">
+        <h3 class="deck-side-heading">現在のデッキ(クリックで1枚減らせます)</h3>
+        <div id="deck-current-list"></div>
+      </div>
+    </div>
     <div class="deck-errors" id="deck-errors"></div>
+    <h3 class="deck-side-heading" id="deck-special-heading" style="margin-top:22px;">
+      参考: カード効果でのみ場に出るカード(デッキには入れられません)
+    </h3>
+    <div id="deck-special-list"></div>
   </div>
 
   <div id="game-screen">
