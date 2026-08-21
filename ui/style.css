@@ -34,8 +34,10 @@ header {
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
 }
 header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 header .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
@@ -44,6 +46,7 @@ header .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
 /* 「ゲームを終了する」はターン終了ボタンと間違えて押されないよう、中央から離した右上に配置する */
 #header-end-game-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 #header-end-game-controls button {
@@ -54,6 +57,7 @@ header .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  white-space: nowrap; /* ボタン内テキストが1文字ずつ縦に折り返されるのを防ぐ */
 }
 #header-end-game-controls button:hover {
   border-color: var(--danger);
@@ -68,6 +72,25 @@ header .sub { color: var(--muted); font-weight: 400; font-size: 12px; }
   opacity: 0.85;
   color: #fff;
 }
+
+/* ホーム画面(setup-screen)のヘッダーボタン行。以前はHTML内のインラインstyleで
+   display:flexのみ指定しており、flex-wrapが無かったため、狭い画面幅では
+   ボタンが際限なく縮んで文字が1文字ずつ縦に折り返される不具合があった
+   (2026/08/21修正。header-end-game-controlsと同じ原因・同じ対処) */
+.home-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.home-header-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.home-header-buttons button { white-space: nowrap; }
 
 main {
   display: flex;
@@ -860,89 +883,96 @@ body.page-local .board-layout.mirrored .board-row .card-effect-tooltip {
 }
 
 /* ==========================================================
-   スマホの横画面(ランドスケープ)対応(2026/08/21追加)
-   PC・タブレット前提の元レイアウト(盤面/手札を横長に並べる構成)は
-   横画面のスマホ(幅は広いが高さが低い)とも相性が良いため、構造の
-   作り直しはせず、余白・フォント・固定幅を画面の高さに応じて縮小する
-   ことで対応する。判定は「横向き」かつ「画面の高さが低い」の両方を
-   条件にすることで、タブレットの横画面(高さに余裕がある)には影響
-   しないようにしている。
+   スマホ表示への切り替え(2026/08/21追加、同日中に方式変更)
+   当初はCSSの @media (orientation: landscape) で自動判定していたが、
+   実機で判定条件(画面の高さ等)に合致せず切り替わらない端末があったため、
+   ヘッダーの「スマホ版に切り替え」ボタンで手動でON/OFFできる
+   body.mobile-view クラス方式に変更した(online-app.js側でクリック時に
+   付け外しし、localStorageに好みを保存して次回以降も覚えておく)。
+   縦画面・横画面どちらでも、このクラスが付いていれば適用される。
    ========================================================== */
-@media (orientation: landscape) and (max-height: 500px) {
-  header {
-    padding: 6px 10px;
-  }
-  header h1 { font-size: 13px; }
-  header .sub { display: none; } /* 副題は幅の余裕がないので隠す */
-  #turn-info { font-size: 11px; }
-  #header-end-game-controls button { padding: 3px 7px; font-size: 10px; }
+body.mobile-view header {
+  padding: 6px 10px;
+}
+body.mobile-view header h1 { font-size: 13px; }
+body.mobile-view header .sub { display: none; } /* 副題は幅の余裕がないので隠す */
+body.mobile-view #turn-info { font-size: 11px; }
+body.mobile-view #header-end-game-controls button { padding: 3px 7px; font-size: 10px; }
+body.mobile-view .home-header-buttons button { padding: 4px 8px; font-size: 11px; }
 
-  main {
-    padding: 6px;
-    gap: 6px;
-  }
-  .player-area {
-    padding: 5px 8px;
-  }
-  .player-area h2 { font-size: 12px; margin-bottom: 3px; }
-  .mini-stats { font-size: 10.5px; gap: 10px; margin: 2px 0; }
+body.mobile-view main {
+  padding: 6px;
+  gap: 6px;
+}
+body.mobile-view .player-area {
+  padding: 5px 8px;
+}
+body.mobile-view .player-area h2 { font-size: 12px; margin-bottom: 3px; }
+body.mobile-view .mini-stats { font-size: 10.5px; gap: 10px; margin: 2px 0; }
 
-  /* 盤面グリッドの固定幅(左列・イベントゾーン・右列)を縮小し、
-     場のカード自体にもっと横幅を割けるようにする */
-  .board-layout {
-    grid-template-columns: 62px 1fr 60px 60px;
-    gap: 5px;
-  }
-  .board-row { gap: 4px; }
-  .hand-row { gap: 4px; min-height: 46px; }
+/* 盤面グリッドの固定幅(左列・イベントゾーン・右列)を縮小し、
+   場のカード自体にもっと横幅を割けるようにする */
+body.mobile-view .board-layout {
+  grid-template-columns: 52px 1fr 50px 50px;
+  gap: 4px;
+}
+body.mobile-view .board-row { gap: 3px; }
+body.mobile-view .hand-row { gap: 3px; min-height: 42px; }
 
-  .card {
-    padding: 3px 5px;
-    font-size: 10px;
-    min-height: 46px;
-    border-radius: 4px;
-  }
-
-  /* 左列/右列/イベントゾーンのシールド・HP・超越・デッキ等の表示も、
-     縮めたグリッド幅(62px/60px)に収まるよう余白・フォントを縮小する */
-  .zone-box {
-    padding: 3px 4px;
-    min-height: 38px;
-    border-radius: 4px;
-  }
-  .zone-box .zone-label { font-size: 8.5px; }
-  .zone-box .zone-value { font-size: 13px; margin-top: 0; }
-  .zone-box.transcend-box .zone-value { font-size: 9.5px; }
-  .side-col.left-col, .right-stack { gap: 4px; }
-  .deck-zone-box { min-height: 32px; }
-
-  .controls { padding: 3px 0; gap: 4px; }
-  .controls button { padding: 5px 10px; font-size: 12px; }
-  #selection-info { font-size: 10.5px; min-height: 12px; }
-
-  /* ログパネルは常時表示だと280px分の横幅を占有してしまい、ただでさえ
-     狭い横画面ではゲーム本体を圧迫するため、既定では折りたたみ、
-     ヘッダーのボタンから開閉できるようにする(下記JS側の対応が必要) */
-  body {
-    grid-template-columns: 1fr 0px;
-  }
-  body.log-open {
-    grid-template-columns: 1fr 200px;
-  }
-  #log-panel {
-    display: none;
-    font-size: 10px;
-    padding: 6px;
-  }
-  body.log-open #log-panel {
-    display: block;
-  }
-  #btn-toggle-log {
-    display: inline-block;
-  }
+body.mobile-view .card {
+  padding: 3px 4px;
+  font-size: 9.5px;
+  min-height: 42px;
+  border-radius: 4px;
 }
 
-/* #btn-toggle-log は横画面の狭い時だけ使うボタンのため、それ以外では常に隠す */
+/* 左列/右列/イベントゾーンのシールド・HP・超越・デッキ等の表示も、
+   縮めたグリッド幅(52px/50px)に収まるよう余白・フォントを縮小する */
+body.mobile-view .zone-box {
+  padding: 2px 3px;
+  min-height: 34px;
+  border-radius: 4px;
+}
+body.mobile-view .zone-box .zone-label { font-size: 8px; }
+body.mobile-view .zone-box .zone-value { font-size: 12px; margin-top: 0; }
+body.mobile-view .zone-box.transcend-box .zone-value { font-size: 9px; }
+body.mobile-view .side-col.left-col, body.mobile-view .right-stack { gap: 3px; }
+body.mobile-view .deck-zone-box { min-height: 28px; }
+
+body.mobile-view .controls { padding: 3px 0; gap: 4px; }
+body.mobile-view .controls button { padding: 5px 10px; font-size: 12px; }
+body.mobile-view #selection-info { font-size: 10.5px; min-height: 12px; }
+
+/* ログパネルは常時表示だと280px分の横幅を占有してしまい、スマホ表示では
+   ゲーム本体を圧迫するため、既定では折りたたみ、ヘッダーのボタンから
+   開閉できるようにする */
+body.mobile-view {
+  grid-template-columns: 1fr 0px;
+}
+body.mobile-view.log-open {
+  grid-template-columns: 1fr 200px;
+}
+body.mobile-view #log-panel {
+  display: none;
+  font-size: 10px;
+  padding: 6px;
+}
+body.mobile-view.log-open #log-panel {
+  display: block;
+}
+body.mobile-view #btn-toggle-log {
+  display: inline-block;
+}
+
+/* デッキ構築画面も、スマホ表示では2カラムを縦積みにする(720px幅の
+   メディアクエリと同じ内容だが、手動切り替えでも同様に適用する) */
+body.mobile-view #deck-builder-columns { flex-direction: column; }
+body.mobile-view #deck-builder-side { width: 100%; position: static; max-height: none; }
+
+/* #btn-toggle-log・#btn-switch-mobile-view は、スマホ表示でない(通常のPC/
+   タブレット表示の)ときは基本的に隠す。切り替えボタン自体(スマホ版に
+   切り替え/PC版に切り替え)はheader-end-game-controls側で表示・非表示を
+   出し分けるため、online-app.js側で表示テキスト・要素の出し分けを行う */
 #btn-toggle-log {
   display: none;
 }
