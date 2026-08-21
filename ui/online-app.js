@@ -12,6 +12,7 @@ import {
   totalCount,
   validateDeck,
   listBuildableCardsForTheme,
+  listSpecialSummonOnlyCardsForTheme,
   listNonGenericThemes,
   listDecks,
   createDeck,
@@ -188,6 +189,66 @@ function renderDeckThemeLabel() {
   el.innerHTML = `<span class="deck-theme-locked">テーマ: ${deckBuilderTheme}(汎用カードと組み合わせて編集できます。テーマ自体はこのデッキでは変更できません)</span>`;
 }
 
+// 現在デッキに入れているカードの一覧(画面右側)。クリックで1枚減らせる
+// (2026/08/21新規追加。右側で一覧を見ながら、左のリストを行ったり来たりしなくても
+// 全体の構成を把握できるようにするため)
+function renderDeckCurrentList() {
+  const el = document.getElementById("deck-current-list");
+  if (!el) return;
+  const entries = Object.entries(deckBuilderDraft)
+    .filter(([, n]) => n > 0)
+    .sort(([an], [bn]) => (CARD_DEFS[an]?.cost ?? 0) - (CARD_DEFS[bn]?.cost ?? 0) || an.localeCompare(bn));
+  if (entries.length === 0) {
+    el.innerHTML = `<div class="deck-current-empty">まだカードが入っていません</div>`;
+    return;
+  }
+  el.innerHTML = entries
+    .map(
+      ([name, n]) =>
+        `<div class="deck-current-row" data-name="${escapeHtml(name)}">
+          <span class="dcr-cost">${costHtml(CARD_DEFS[name]?.cost)}</span>
+          <span class="dcr-name">${escapeHtml(name)}</span>
+          <span class="dcr-count">×${n}</span>
+        </div>`
+    )
+    .join("");
+  el.querySelectorAll(".deck-current-row").forEach((row) => {
+    row.onclick = () => {
+      const name = row.dataset.name;
+      const n = deckBuilderDraft[name] ?? 0;
+      if (n > 0) deckBuilderDraft[name] = n - 1;
+      if (deckBuilderDraft[name] === 0) delete deckBuilderDraft[name];
+      renderDeckBuilder();
+    };
+  });
+}
+
+// 枚数制限0(デッキには入れられず、カード効果でのみ場に出る)カードを、
+// ステータス・効果が確認できるよう参考表示する(2026/08/21新規追加)。
+// あくまで参照用のため、+/-ボタンは付けない
+function renderDeckSpecialSummonOnlyList() {
+  const el = document.getElementById("deck-special-list");
+  if (!el) return;
+  const cards = listSpecialSummonOnlyCardsForTheme(deckBuilderTheme);
+  if (cards.length === 0) {
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = cards
+    .map(
+      (def) => `
+        <div class="deck-card special-summon-only ${cardTierClass(def)}">
+          ${raceLineHtml(def.name)}
+          <div class="name">${escapeHtml(def.name)}</div>
+          <div class="meta">コスト${costHtml(def.cost)} ${def.type ?? ""} ${def.theme ? `/ ${def.theme}` : ""}</div>
+          ${def.type === CARD_TYPES.MONSTER ? `<div class="meta">${def.atk} / ${def.hp}</div>` : ""}
+          <div class="special-summon-only-label">カード効果でのみ場に出る(デッキには入れられません)</div>
+          ${cardEffectTooltipHtml(def.name)}
+        </div>`
+    )
+    .join("");
+}
+
 function renderDeckBuilder() {
   const listEl = document.getElementById("deck-card-list");
   listEl.innerHTML = "";
@@ -223,6 +284,9 @@ function renderDeckBuilder() {
     };
     listEl.appendChild(el);
   }
+
+  renderDeckCurrentList();
+  renderDeckSpecialSummonOnlyList();
 
   const total = totalCount(deckBuilderDraft);
   const countEl = document.getElementById("deck-count");
@@ -512,7 +576,7 @@ function subscribeToMetaForInit() {
 
     try {
       const stateRef = dbRefFns.ref(db, `rooms/${roomCode}/state`);
-      await dbRefFns.runTransaction(stateRef, (currentData) => {
+      const result = await dbRefFns.runTransaction(stateRef, (currentData) => {
         if (currentData !== null) return currentData; // 既に初期化済みなら何もしない
         // 先攻・後攻をランダムに抽選する(p1=部屋を作った人、p2=参加した人、
         // という役割はここでは変えず、「どちらが先攻か」だけを50%で決める)
@@ -526,6 +590,13 @@ function subscribeToMetaForInit() {
         initGame.startGame();
         return serializeGame(initGame);
       });
+      // 2026/08/21追加: 初期化が完了した(=state が存在するようになった)時点で、
+      // このmetaリスナーはもう不要なので自ら解除する。以前は対戦中もずっと購読され
+      // たままで、対戦中に万一metaが変化した場合に不要な再処理が走る余地があった
+      if (result.committed && result.snapshot.exists()) {
+        metaInitUnsub?.();
+        metaInitUnsub = null;
+      }
     } catch (err) {
       console.error("対戦初期化エラー:", err);
     }
@@ -1364,9 +1435,17 @@ function renderBoard(role) {
     } else {
       const el = renderEmptySlot();
       el.dataset.slot = String(slot);
+      // ドクター・ベアトラップ①で毒化された枠は、相手からも自分からも分かるよう表示する
+      // (2026/08/21追加。今後も「場を変化させる効果」は同様に、相手にも見える形で
+      // 表示することを基本方針とする)
+      if (player.poisonedSlots && player.poisonedSlots.has(slot)) {
+        el.classList.add("poisoned-slot");
+        el.textContent = "毒";
+        el.title = "この枠に召喚されたモンスターには毒8が付与されます(ドクター・ベアトラップ)";
+      }
       if (clickSummonMode) {
         el.classList.remove("empty-slot");
-        el.textContent = "ここに召喚";
+        el.textContent = el.classList.contains("poisoned-slot") ? "ここに召喚(毒化枠)" : "ここに召喚";
         el.onclick = () => trySummonToSlot(selectedHandCard, slot);
       }
       // ドラッグ&ドロップ: 通常召喚(リリース不要)の手札を、この空き枠へドロップできる
@@ -1608,15 +1687,17 @@ function openZoneModal(playerId, zoneKey) {
     // 名前だけの一覧では種類・ステータス・効果が分からず選びにくいとのフィードバックを受け、
     // 手札等と同じ情報量(種類・タイプ・ステータス・効果文)を1枚ずつ表示する形に変更(2026/08/14)
     for (const [name, count] of [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const def = CARD_DEFS[name];
       const row = document.createElement("div");
       row.className = "zone-modal-card";
+      // 2026/08/21変更: 効果文を常時表示すると幅を取って確認しづらいとの要望を受け、
+      // カード名にカーソルを合わせたとき(手札・デッキ構築画面と同じcardEffectTooltipHtml)
+      // だけ表示するようにした。名前・種類/タイプの行はそのまま常時見えるようにしてある
       row.innerHTML = `
         <div class="zone-modal-card-head">
           <span class="zone-modal-card-name">${escapeHtml(name)}${count > 1 ? ` ×${count}` : ""}</span>
         </div>
         <div class="zone-modal-card-meta">${escapeHtml(cardTypeSummary(name))}</div>
-        ${def?.effect ? `<div class="zone-modal-card-effect">${escapeHtml(def.effect)}</div>` : ""}
+        ${cardEffectTooltipHtml(name)}
       `;
       contentEl.appendChild(row);
     }
@@ -1841,7 +1922,9 @@ function renderInner() {
 
   document.getElementById("turn-info").textContent =
     game.phase === "between"
-      ? "手番切り替え中..."
+      ? game.pendingNextPlayerId === myPlayerId
+        ? "自分のターン開始中..."
+        : "相手のターン開始中..."
       : `ターン${game.turnNumber} / ${game.activePlayerId === myPlayerId ? "あなたの番" : "相手の番"}(フェイズ:${game.phase})`;
 
   renderStats("me");
@@ -1908,7 +1991,12 @@ document.getElementById("btn-mulligan-me").onclick = async () => {
       return serializeGame(tempGame);
     });
     if (result.committed && result.snapshot.exists()) {
-      game = hydrateGame(result.snapshot.val(), { log: pushLog });
+      // 2026/08/21修正: 他の書き込み経路(pushState())は必ずlocalStateVersionを
+      // 更新しているのに、マリガン確定(runTransaction経由)だけがこれを更新しておらず、
+      // 一貫性が崩れていた。以後に届く更新の新旧判定がずれる原因になり得るため統一する
+      const committedVal = result.snapshot.val();
+      localStateVersion = committedVal.updatedAt ?? localStateVersion;
+      game = hydrateGame(committedVal, { log: pushLog });
     }
   } catch (err) {
     alert(err.message);
