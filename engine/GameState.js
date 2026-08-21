@@ -488,7 +488,9 @@ export class GameState {
     player.hand.splice(finalIdx, 1);
 
     const instance = createCardInstance(defName, playerId, genUid());
-    instance.summonedOnTurn = this.turnNumber;
+    // 召喚酔いの判定基準は「グローバルターン数」ではなく、このモンスターの所有者自身の
+    // 自ターン数(ownTurnCount)を使う(2026/08/21修正、詳細はcanAttack()のコメント参照)
+    instance.summonedOnTurn = player.ownTurnCount;
     player.board[targetSlot] = instance;
 
     this.log(`${playerId}: 『${defName}』を召喚(${targetSlot}枠)`);
@@ -516,7 +518,14 @@ export class GameState {
     const player = this.players[playerId];
     if (player.board[boardSlot]) throw new Error("その盤面枠は空いていません");
     const instance = createCardInstance(defName, playerId, genUid());
-    instance.summonedOnTurn = this.turnNumber;
+    // 2026/08/21修正: グローバルターン数(turnNumber)は先攻・後攻で共有されるカウンタの
+    // ため、「相手が自分のモンスターを戦闘で破壊し、その結果として自分の場に特殊召喚される」
+    // ケース(例:ヒュドラ―の分頭)で、召喚された瞬間はまだ相手のターン中でturnNumberが
+    // 据え置きのまま、その後に迎える「自分の」ターンでもturnNumberが変わらないため、
+    // 本来2ターン目のはずなのに召喚酔い判定(sick)が誤って継続し、攻撃できなくなる
+    // 不具合があった。所有者自身の自ターン数(ownTurnCount)基準に変更することで、
+    // 相手ターン中に特殊召喚されても、次に迎える自分のターンには正しく酔いが解ける
+    instance.summonedOnTurn = player.ownTurnCount;
     for (const k of grantedKeywords) instance.grantedKeywords.add(k);
     player.board[boardSlot] = instance;
     this.log(`${playerId}: 『${defName}』を特殊召喚(デッキ外生成, ${boardSlot}枠)`);
@@ -554,24 +563,57 @@ export class GameState {
   // ---------------- 破壊・死亡処理 ----------------
 
   sendToGraveyard(player, instance) {
+    this._removeFromBoardToGraveyard(player, instance);
+    this._maybeResetShieldOnEmptyBoard(player);
+    this._triggerLeaveFieldHook(player, instance);
+  }
+
+  // sendToGraveyard()を3段階に分けた内部ヘルパー(2026/08/21新設)。
+  // コーションのような「複数体を同時に破壊する」効果で、1体ずつ処理すると
+  // 起きていた2つの不具合に対応するため:
+  //  ①後続の破壊対象がまだ場に残っている間に、先に破壊された1体の離脱時効果
+  //   (例:ヒュドラ―の分頭の特殊召喚)が発動してしまい、本来空くはずの枠を
+  //   使い切ってしまう(結果、特殊召喚できる体数が減ってしまう)
+  //  ②同様の理由で、全体が破壊しきる前に離脱時効果が場を埋め戻してしまい、
+  //   「場が0体になった瞬間」が一度も訪れず、シールドがリセットされない
+  // これを避けるため、sendManyToGraveyard()では「全員を場から除去→シールド確定
+  // →離脱時効果をまとめて発火」の順で処理する
+  _removeFromBoardToGraveyard(player, instance) {
     const slot = player.board.indexOf(instance);
     if (slot !== -1) player.board[slot] = null;
     player.graveyard.push(instance.defName);
     this.log(`${player.id}: 『${instance.defName}』が場を離れた(墓地へ)`);
     this.emitUiEvent({ type: "destroy", ownerId: player.id, slot, defName: instance.defName });
+  }
 
-    // 相手ターン中に自分の場のモンスターが0体になったらシールドは0にリセット
+  _maybeResetShieldOnEmptyBoard(player) {
+    // 場のモンスターが0体になったらシールドは0にリセットする。
+    // 以前は「相手ターン中のみ」に限定していたが、自分のターン終了処理では
+    // シールドのスナップショット計算(場のHP合計/2を加算)の直後に毒ダメージ処理が
+    // 走るため、そこで自分の場が全滅した場合にリセットされない不具合があった
+    // (2026/08/21修正)。自分のターン開始時点でシールドは既に0にリセットされている
+    // (startTurn側)ため、この条件を外しても自ターン中の挙動には影響しない
     const aliveCount = player.board.filter(Boolean).length;
-    if (aliveCount === 0 && this.activePlayerId !== player.id) {
+    if (aliveCount === 0 && player.shield > 0) {
       player.shield = 0;
       this.log(`${player.id}: 場のモンスターが0体になったためシールドをリセット`);
     }
+  }
 
+  _triggerLeaveFieldHook(player, instance) {
     // 連動破壊などのフック(例: ゴ・ド・リックの右腕)。opponent は2026/08/16追加
     // (ドクター・ベアトラップ②「場に存在するモンスターすべて」のように、
     //  自分の場だけでなく相手の場も参照するカードに対応するため)
     const hook = EFFECTS[instance.defName]?.onLeaveField;
     if (hook) hook({ game: this, player, opponent: this.players[this.opponentOf(player.id)], instance });
+  }
+
+  // 複数体をまとめて破壊する(コーション等、無敵・免疫チェック済みの対象を渡すこと)。
+  // 上記_removeFromBoardToGraveyard等のコメント参照
+  sendManyToGraveyard(player, instances) {
+    for (const instance of instances) this._removeFromBoardToGraveyard(player, instance);
+    this._maybeResetShieldOnEmptyBoard(player);
+    for (const instance of instances) this._triggerLeaveFieldHook(player, instance);
   }
 
   // ---------------- 超越 ----------------
@@ -635,7 +677,7 @@ export class GameState {
     instance.invulnerableThisTurn = true;
 
     // 召喚酔い中なら「突撃」状態を一時付与(モンスターへの攻撃のみ、そのターン限り)
-    if (instance.summonedOnTurn === this.turnNumber && !this.hasKeyword(instance, KEYWORDS.SOKKOU)) {
+    if (instance.summonedOnTurn === player.ownTurnCount && !this.hasKeyword(instance, KEYWORDS.SOKKOU)) {
       instance.attackRestrictionThisTurn = "monsterOnly";
     }
 
@@ -699,7 +741,13 @@ export class GameState {
     if (instance.cannotAttack) return false;
     if (instance.hasAttackedThisTurn) return false;
     if (this.isAttackBlockedByPoison(playerId, instance)) return false;
-    const sick = instance.summonedOnTurn === this.turnNumber;
+    // 召喚酔いの判定は、共有のグローバルターン数(turnNumber)ではなく、このモンスターの
+    // 所有者(playerId)自身の自ターン数(ownTurnCount)で行う(2026/08/21修正)。
+    // turnNumberは先攻・後攻で共有される値のため、例えば「相手ターン中に相手の攻撃で
+    // 自分のモンスターが破壊され、その結果このカードが自分の場に特殊召喚された」場合、
+    // turnNumber基準だと次に迎える自分のターンでもまだ同じturnNumberのままとなり、
+    // 本来は酔いが解けているはずなのに攻撃できない不具合があった(ヒュドラ―の分頭で確認)
+    const sick = instance.summonedOnTurn === this.players[playerId].ownTurnCount;
     if (!sick) return true;
     if (this.hasKeyword(instance, KEYWORDS.SOKKOU)) return true;
     if (this.hasKeyword(instance, KEYWORDS.TOTSUGEKI)) return true;
@@ -715,7 +763,7 @@ export class GameState {
     const opponent = this.players[opponentId];
 
     const restrictedToMonsterOnly =
-      (attackerInstance.summonedOnTurn === this.turnNumber &&
+      (attackerInstance.summonedOnTurn === player.ownTurnCount &&
         !this.hasKeyword(attackerInstance, KEYWORDS.SOKKOU) &&
         (this.hasKeyword(attackerInstance, KEYWORDS.TOTSUGEKI) ||
           attackerInstance.attackRestrictionThisTurn === "monsterOnly"));
@@ -774,11 +822,26 @@ export class GameState {
   }
 
   resolveCombat(attacker, defender, attackerPlayer, defenderPlayer) {
+    // 【確殺】は「交戦した相手をステータス無視で破壊する」効果のため、この交戦の結果は
+    // 確殺の判定(下記attackerKakusatsu/defenderKakusatsu)で確定するべきところ、通常の
+    // ダメージ計算より前に発動する交戦時トリガー(ドクター・イミュニティ等の毒による
+    // 即時ダメージ)がこの時点で確殺持ちを直接破壊してしまうと、確殺自体の判定に
+    // 一切たどり着けなくなってしまう不具合があった(2026/08/21修正)。
+    // 交戦時トリガーの実行中だけ、確殺持ちをdealDamageToMonster()による破壊から保護する
+    // (通常のステータスによる打ち合い自体からは保護しない。確殺は「一方的に相手を破壊する」
+    // 効果であって「自分が破壊されない」効果ではないため、下記の通常ダメージ計算・
+    // attackerDies/defenderDiesの判定は従来通り)
+    attacker._kakusatsuCombatShield = this.hasKeyword(attacker, KEYWORDS.KAKUSATSU);
+    defender._kakusatsuCombatShield = this.hasKeyword(defender, KEYWORDS.KAKUSATSU);
+
     // 毒関連の「交戦時」フック(ドクトゲガエル・デカめのサソリ・ヒュドラ―の分頭・
     // ドクター・イミュニティ等)。通常のダメージ計算より前に実行し、攻撃側・防御側
     // どちらの立場でも交戦したことになる双方に対して発火する
     this.triggerOnCombat(attacker, attackerPlayer, defender, defenderPlayer);
     this.triggerOnCombat(defender, defenderPlayer, attacker, attackerPlayer);
+
+    delete attacker._kakusatsuCombatShield;
+    delete defender._kakusatsuCombatShield;
 
     const attackerInvuln = attacker.invulnerableThisTurn;
     const defenderInvuln = defender.invulnerableThisTurn;
@@ -1009,7 +1072,9 @@ export class GameState {
     const slot = defenderPlayer.board.indexOf(instance);
     instance.currentHp -= amount;
     this.emitUiEvent({ type: "damageMonster", ownerId: defenderPlayer.id, slot, amount, defName: instance.defName });
-    if (instance.currentHp <= 0) this.sendToGraveyard(defenderPlayer, instance);
+    // 【確殺】保護中(resolveCombat()の交戦時トリガー実行中)は、このダメージで破壊されない。
+    // 確殺自身の「ステータス無視で相手を破壊する」判定に必ずたどり着けるようにするための処置
+    if (instance.currentHp <= 0 && !instance._kakusatsuCombatShield) this.sendToGraveyard(defenderPlayer, instance);
   }
 
   dealDamageToAllEnemyMonsters(opponent, amount) {
@@ -1024,17 +1089,49 @@ export class GameState {
     this.sendToGraveyard(ownerPlayer, instance);
   }
 
+  // destroyMonster()の複数体版(2026/08/21新設。コーション「相手の場にいるモンスターを
+  // すべて破壊する」等が利用)。無敵・免疫チェックは個別に適用したうえで、実際に破壊できる
+  // 対象だけをsendManyToGraveyard()でまとめて処理する(全体除去→シールド確定→離脱時効果、
+  // という正しい順序で解決するため。詳細はsendManyToGraveyard()のコメント参照)。
+  // 戻り値: 実際に破壊された(無敵・免疫で守られなかった)インスタンスの配列
+  destroyMonsters(ownerPlayer, instances) {
+    const targets = instances.filter(
+      (instance) => !instance.invulnerableThisTurn && !this.isImmuneToEffectHarm(ownerPlayer, instance)
+    );
+    if (targets.length > 0) this.sendManyToGraveyard(ownerPlayer, targets);
+    return targets;
+  }
+
   healPlayer(player, amount) {
     player.hp = Math.min(player.hp + amount, CONFIG.MAX_HP);
     this.log(`${player.id}: 体力が${amount}回復(現在${player.hp})`);
     this.emitUiEvent({ type: "healPlayer", playerId: player.id, amount });
   }
 
-  // イベント効果や超越の継続効果など、戦闘以外の直接プレイヤーへのダメージ用の共通ヘルパー
+  // イベント効果や超越の継続効果など、戦闘以外の直接プレイヤーへのダメージ用の共通ヘルパー。
+  // こちらは「貫通」タイプで、シールドを無視して直接HPを削る
   dealDamageToPlayer(player, amount) {
     player.hp -= amount;
     this.log(`${player.id}: 直接${amount}ダメージ(残りHP${player.hp})`);
     this.emitUiEvent({ type: "damagePlayer", playerId: player.id, amount });
+    this.checkWinCondition();
+  }
+
+  // カード効果によるプレイヤーへのダメージのうち、通常の直接攻撃・毒ダメージと同様に
+  // シールドで防げるもの用の共通ヘルパー(2026/08/21新設)。dealDamageToPlayer()との違いは
+  // シールドを無視するかどうかのみ。カードの意図に応じてどちらを使うか使い分けること
+  // (火刑に処されし聖女の超越効果は、以前dealDamageToPlayer()でシールドを無視していたが、
+  // 本来はシールドで防げる仕様のため、こちらに変更された)
+  dealShieldableDamageToPlayer(player, amount) {
+    let dmg = amount;
+    if (player.shield > 0) {
+      const absorbed = Math.min(player.shield, dmg);
+      player.shield -= absorbed;
+      dmg -= absorbed;
+    }
+    player.hp -= dmg;
+    this.log(`${player.id}: 効果により${amount}ダメージ(シールド消費後の実ダメージ${dmg}、残りHP${player.hp})`);
+    this.emitUiEvent({ type: "damagePlayer", playerId: player.id, amount: dmg });
     this.checkWinCondition();
   }
 
