@@ -45,7 +45,29 @@ function migrateFromOldFormatIfNeeded() {
 }
 
 function loadDecksData() {
-  return migrateFromOldFormatIfNeeded();
+  return migrateThemeRenamesIfNeeded(migrateFromOldFormatIfNeeded());
+}
+
+// テーマ名そのものが変更された場合(例: 2026/08/21「赤」→「ドラゴニア」)、
+// 既にそのテーマでデッキを組んでいたユーザーの保存データが古い名前のまま
+// 残ってしまう。放置すると、そのデッキを開いたときにlistBuildableCardsForTheme()が
+// 新テーマ名でしかカードを拾えず、既存の採用カードがデッキ編集画面から
+// 消えたように見えてしまう不具合になる。そのため、旧テーマ名→新テーマ名の
+// 対応表に沿って、保存データ側を自動的に書き換えておく(2026/08/21新設)。
+// 今後また同様のテーマ名変更があれば、この対応表に追記すればよい
+const THEME_RENAMES = {
+  "赤": "ドラゴニア",
+};
+function migrateThemeRenamesIfNeeded(data) {
+  let changed = false;
+  for (const deck of Object.values(data.decks)) {
+    if (deck.theme && THEME_RENAMES[deck.theme]) {
+      deck.theme = THEME_RENAMES[deck.theme];
+      changed = true;
+    }
+  }
+  if (changed) writeDecksData(data);
+  return data;
 }
 
 export function copyLimitOf(defName) {
@@ -66,9 +88,9 @@ export function totalCount(counts) {
   return Object.values(counts).reduce((a, b) => a + b, 0);
 }
 
-// デッキ内で使われている「汎用以外」のテーマ一覧を返す(赤・クレリック等)。
+// デッキ内で使われている「汎用以外」のテーマ一覧を返す(ドラゴニア・クレリック等)。
 // 汎用カードはどのデッキにも組み込めるが、汎用以外のテーマは1デッキにつき1つまでしか
-// 混在させられない(例: 赤テーマとクレリックテーマを同じデッキに入れることはできない)。
+// 混在させられない(例: ドラゴニアテーマとクレリックテーマを同じデッキに入れることはできない)。
 export function nonGenericThemesUsed(counts) {
   const themes = new Set();
   for (const name of Object.keys(counts)) {
