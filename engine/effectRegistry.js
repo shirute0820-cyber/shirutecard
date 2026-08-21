@@ -130,7 +130,7 @@ export const EFFECTS = {
     },
   },
 
-  // ---------- 赤テーマ ----------
+  // ---------- ドラゴニアテーマ(旧・赤テーマ) ----------
   竜餐の祭日: {
     onEvent({ game, player }) {
       if (!game.dragonKilledThisTurnByCombat) {
