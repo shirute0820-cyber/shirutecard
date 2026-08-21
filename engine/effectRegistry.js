@@ -631,9 +631,15 @@ export const EFFECTS = {
   異端審問官コーション: {
     onSummon({ game, opponent }) {
       const targets = opponent.board.filter(Boolean);
-      const count = targets.length;
-      for (const m of targets) game.destroyMonster(opponent, m);
-      if (count > 0) game.dealDamageToPlayer(opponent, count * 4);
+      // 2026/08/21修正: 以前は1体ずつdestroyMonster()していたため、「相手の場全体が
+      // 破壊しきる前に、先に破壊されたモンスターの離脱時効果(ヒュドラ―の分頭の
+      // 特殊召喚等)が発動してしまい、まだ破壊されていない他のモンスターの分だけ
+      // 場の空きが埋まっていて、本来出せるはずの体数が出せない」「場が一度も
+      // 0体にならないため、シールドがリセットされない」という2つの不具合があった。
+      // まとめて破壊するdestroyMonsters()に変更し、「全滅→シールド確定→
+      // 離脱時効果(分頭の特殊召喚)」の順で正しく解決されるようにする
+      const destroyed = game.destroyMonsters(opponent, targets);
+      if (destroyed.length > 0) game.dealDamageToPlayer(opponent, destroyed.length * 4);
     },
   },
   火刑に処されし聖女: {
@@ -656,7 +662,7 @@ export const EFFECTS = {
       }
     },
     onTranscend({ game, opponent }) {
-      game.dealDamageToPlayer(opponent, 20);
+      game.dealShieldableDamageToPlayer(opponent, 20);
     },
   },
 
@@ -864,10 +870,13 @@ export const EFFECTS = {
     },
   },
   "ヒュドラ―の分頭": {
-    onSummon({ instance }) {
+    onSummon({ game, instance }) {
       const options = [KEYWORDS.TOTSUGEKI, KEYWORDS.CHOUHATSU, KEYWORDS.ONMITSU, KEYWORDS.KAKUSATSU];
       const chosen = options[Math.floor(Math.random() * options.length)];
       instance.grantedKeywords.add(chosen);
+      // 2026/08/21修正: ①でランダムに付与されたキーワードが何なのかログに一切出ておらず、
+      // 場に出た本人にも相手にも分からない不具合があった。何が付与されたか必ずログに残す
+      game.log(`${instance.defName}: 【${chosen}】を獲得した`);
     },
     onCombat({ game, opponent, enemyInstance }) {
       if (enemyInstance) game.applyPoisonToPlayer(opponent, 4);
@@ -910,7 +919,7 @@ export const EFFECTS = {
       // このカードが破壊されると相手プレイヤーに毒4を付与する(効果自体はクイーン側の
       // カードテキストだが、発火元はベイビー自身の場離脱のためここで判定する)
       const hasQueen = player.board.some((m) => m && m.defName === "タランチュラ・クイーン");
-      if (hasQueen) game.applyPoisonToPlayer(opponent, 4);
+      if (hasQueen) game.applyPoisonToPlayer(opponent, 8);
     },
   },
   "タランチュラ・クイーン": {
