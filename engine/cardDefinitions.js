@@ -227,7 +227,7 @@ export const CARD_DEFS = {
   },
   火刑に処されし聖女: { cardId: 311,
     theme: "クレリック",
-    effect: "このカードが場に出たとき、自分の墓地の『天啓の聖女ジャンヌ・ダルク』の枚数によって以下の効果を発動できる。1枚以上なら、敵のモンスターを1体選び破壊する。2枚以上なら、このカードを+4/+4する。3枚以上なら、『忠義の騎士ジル・ド・レェ』1体を自分の場に出す。4枚以上なら、このカードは【速攻】を持つ。《超越》相手のHPに20ダメージ与える。",
+    effect: "このカードが場に出たとき、自分の墓地の『天啓の聖女ジャンヌ・ダルク』の枚数によって以下の効果を発動できる。1枚以上なら、敵のモンスターを1体選び破壊する。2枚以上なら、このカードを+4/+4する。3枚以上なら、『忠義の騎士ジル・ド・レェ』1体を自分の場に出す。4枚以上なら、このカードは【速攻】を持つ。《超越》相手プレイヤーに20ダメージ与える(シールドで防げる)。",
     name: "火刑に処されし聖女", type: CARD_TYPES.MONSTER, cost: 9, atk: 28, hp: 28,
     race: "聖女", keywords: [],
   },
@@ -276,9 +276,9 @@ export const CARD_DEFS = {
   },
   ドクター・ニューロトキシン: { cardId: 410,
     theme: "トリッカー",
-    effect: "【抗体】毒が付与されている相手モンスターは攻撃できない。≪超越≫相手の場に存在するモンスターすべてに毒12を付与する。",
+    effect: "毒が付与されている相手モンスターは攻撃できない。≪超越≫相手の場に存在するモンスターすべてに毒12を付与する。",
     name: "ドクター・ニューロトキシン", type: CARD_TYPES.MONSTER, cost: 4, atk: 12, hp: 8,
-    race: "科学者", keywords: [KEYWORDS.KOUTAI],
+    race: "科学者", keywords: [],
   },
   デカめのサソリ: { cardId: 411,
     theme: "トリッカー",
@@ -315,7 +315,7 @@ export const CARD_DEFS = {
   "ヒュドラ―の分頭": { cardId: 417,
     theme: "トリッカー",
     effect: "【抗体】①場に出たとき、【突撃】【挑発】【隠密】【確殺】のいずれかを持つ。②交戦時、相手プレイヤーに毒4を付与する。③場から離れたとき、自プレイヤーのHPを8回復する。",
-    name: "ヒュドラ―の分頭", type: CARD_TYPES.MONSTER, cost: 0, atk: 12, hp: 8,
+    name: "ヒュドラ―の分頭", type: CARD_TYPES.MONSTER, cost: 0, atk: 8, hp: 8,
     race: "毒性生物", keywords: [KEYWORDS.KOUTAI], copyLimit: 0, // デッキ投入不可、特殊召喚専用
   },
   "九頭竜ヒュドラ―": { cardId: 418,
@@ -332,7 +332,7 @@ export const CARD_DEFS = {
   },
   "タランチュラ・クイーン": { cardId: 420,
     theme: "トリッカー",
-    effect: "【隠密】①場に出たとき『タランチュラベイビー』2体を自分の場に出す。それは【突撃】を持つ。②1ターンに1度発動可能。自分の場に『タランチュラベイビー』1体を特殊召喚する。③自分の場に存在する『タランチュラ・ベイビー』が破壊されたとき、相手プレイヤーに毒4を付与する。≪超越≫自分の場に存在する『タランチュラベイビー』は+12/+8される。",
+    effect: "【隠密】①場に出たとき『タランチュラベイビー』2体を自分の場に出す。それは【突撃】を持つ。②1ターンに1度発動可能。自分の場に『タランチュラベイビー』1体を特殊召喚する。③自分の場に存在する『タランチュラ・ベイビー』が破壊されたとき、相手プレイヤーに毒8を付与する。≪超越≫自分の場に存在する『タランチュラベイビー』は+12/+8される。",
     name: "タランチュラ・クイーン", type: CARD_TYPES.MONSTER, cost: 6, atk: 24, hp: 12,
     race: "毒性生物", keywords: [KEYWORDS.ONMITSU],
   },
@@ -355,7 +355,7 @@ export function createCardInstance(defName, ownerId, instanceId) {
     cannotAttack: !!def.cannotAttack,
     baseKeywords: new Set(def.keywords ?? []),
     grantedKeywords: new Set(), // カード効果で後から付与。場を離れると自動消滅(インスタンス破棄で自然に達成)
-    summonedOnTurn: null,       // グローバルターン数
+    summonedOnTurn: null,       // 召喚酔い判定用: 召喚された時点の所有者自身の自ターン数(ownTurnCount)
     hasAttackedThisTurn: false,
     transcended: false,
     invulnerableThisTurn: false,
