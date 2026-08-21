@@ -314,6 +314,11 @@ main {
   50% { box-shadow: 0 0 12px 4px rgba(255, 62, 200, 0.65); }
 }
 .card.empty-slot { background: transparent; border-style: dashed; color: var(--muted); cursor: default; align-items: center; justify-content: center; }
+.card.empty-slot.poisoned-slot {
+  border-color: #7a4fb8;
+  color: #c9a3ff;
+  background: rgba(122, 79, 184, 0.15);
+}
 .card.event-zone { border-color: var(--tier-event); color: var(--tier-event); font-size: 11px; }
 .card .name { font-weight: 600; }
 /* .race-line(カードの種類表示)は.card以外の場所(デッキ編集画面の.deck-card等)でも
@@ -558,17 +563,21 @@ body.page-local .board-layout.mirrored .board-row .card-effect-tooltip {
 .zone-modal-card-name {
   font-weight: 600;
   color: var(--text);
+  cursor: help; /* カーソルを合わせると効果ツールチップが出ることが分かるように */
 }
 .zone-modal-card-meta {
   font-size: 11px;
   color: var(--accent2);
   margin-top: 2px;
 }
-.zone-modal-card-effect {
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.5;
-  margin-top: 4px;
+/* 2026/08/21変更: 効果文は常時表示すると幅を取って確認しづらいとの要望を受け、
+   カード名にカーソルを合わせたときだけ表示するツールチップ方式に変更した
+   (手札・デッキ構築画面のcard-effect-tooltipと同じ仕組みを流用) */
+#zone-modal-content > .zone-modal-card {
+  position: relative; /* ツールチップの基準位置にする */
+}
+.zone-modal-card:hover .card-effect-tooltip {
+  opacity: 1;
 }
 
 #picker-modal-list {
