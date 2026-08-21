@@ -662,7 +662,7 @@ export const EFFECTS = {
       }
     },
     onTranscend({ game, opponent }) {
-      game.dealShieldableDamageToPlayer(opponent, 20);
+      game.dealShieldableDamageToPlayer(opponent, 40);
     },
   },
 
